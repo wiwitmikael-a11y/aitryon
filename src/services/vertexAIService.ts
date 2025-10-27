@@ -15,7 +15,7 @@ export const generateTryOnImage = async (
   productImageBase64: string,
   allowAdult: boolean
 ): Promise<string> => {
-  // FIX: Switched to process.env.API_KEY to align with coding guidelines and resolve TypeScript error.
+  // Fix: Use process.env.API_KEY to align with guidelines and fix build errors.
   const apiKey = process.env.API_KEY;
 
   if (!apiKey) {

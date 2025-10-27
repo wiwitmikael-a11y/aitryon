@@ -1,4 +1,3 @@
-// FIX: Restored file content that was corrupted, causing it to be an invalid module.
 import React, { useState, useCallback } from 'react';
 import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';
@@ -12,8 +11,10 @@ function App() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Fix: Re-introduce allowAdult state for controlling generation mode.
   const [allowAdult, setAllowAdult] = useState(true);
 
+  // Fix: Pass allowAdult to generateTryOnImage and add to dependency array.
   const handleGenerate = useCallback(async () => {
     if (!personImage || !productImage) {
       setError('Please upload both a person and a product image.');
@@ -52,6 +53,7 @@ function App() {
               <ImageUploader label="Person Image" onImageUpload={setPersonImage} />
               <ImageUploader label="Clothing Item" onImageUpload={setProductImage} />
             </div>
+             {/* Fix: Re-introduce UI for setting adult generation mode. */}
              <div className="flex items-center space-x-3 mt-4 bg-slate-700/50 p-4 rounded-lg">
               <input
                 type="checkbox"
