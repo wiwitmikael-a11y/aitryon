@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db } from './lib/db';
 import type { Job } from '../src/types';
-import { randomUUID } from 'crypto';
 
 export default async function handler(
   req: VercelRequest,
@@ -18,7 +17,7 @@ export default async function handler(
       return res.status(400).json({ message: 'Missing personImage or productImage' });
     }
 
-    const jobId = randomUUID();
+    const jobId = Date.now().toString(36) + Math.random().toString(36).substring(2);
     const newJob: Job = {
       id: jobId,
       status: 'PENDING',
