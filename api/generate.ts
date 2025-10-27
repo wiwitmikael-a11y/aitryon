@@ -1,59 +1,37 @@
-import { kv } from '@vercel/kv';
-import { v4 as uuidv4 } from 'uuid';
-import { Client } from '@upstash/qstash';
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { Job } from '../src/types';
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { createJob } from './lib/db';
+import { processJob } from './process-job';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-    if (req.method !== 'POST') {
-        return res.status(405).json({ message: 'Method Not Allowed' });
+/**
+ * API route to submit a new virtual try-on job.
+ * It creates a job, starts processing it asynchronously,
+ * and returns the job ID to the client.
+ */
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
+    return res.status(405).json({ message: 'Method Not Allowed' });
+  }
+
+  try {
+    const { personImage, productImage } = req.body;
+
+    if (!personImage || !productImage) {
+      return res.status(400).json({ message: 'Missing personImage or productImage' });
     }
 
-    // --- Configuration Validation ---
-    if (!process.env.QSTASH_TOKEN) {
-        console.error("Server Error: QSTASH_TOKEN environment variable is not set.");
-        return res.status(500).json({ message: 'Server configuration error: QStash token is missing.' });
-    }
-    if (!process.env.KV_URL || !process.env.KV_REST_API_TOKEN) {
-        console.error("Server Error: Vercel KV environment variables are not set.");
-        return res.status(500).json({ message: 'Server configuration error: KV database is not connected.' });
-    }
+    const job = createJob({ personImage, productImage });
 
-    try {
-        const { personImage, productImage } = req.body;
+    // Start processing asynchronously without waiting for it to finish.
+    // The client will poll the status endpoint.
+    processJob(job.id).catch(console.error);
 
-        if (!personImage || !productImage) {
-            return res.status(400).json({ message: 'Missing person or product image.' });
-        }
-        
-        const jobId = uuidv4();
-        const job: Job = {
-            id: jobId,
-            status: 'PENDING',
-            personImage,
-            productImage,
-            createdAt: Date.now(),
-        };
-
-        // 1. Store the initial job state in Vercel KV
-        await kv.set(`job:${jobId}`, job, { ex: 60 * 60 }); // Expire in 1 hour
-
-        // 2. Publish the job to the QStash queue for reliable processing
-        const qstashClient = new Client({ token: process.env.QSTASH_TOKEN });
-        const appUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
-        const destinationUrl = `${appUrl}/api/process-job`;
-
-        await qstashClient.publishJSON({
-            url: destinationUrl,
-            body: { jobId },
-            headers: { 'Content-Type': 'application/json' },
-        });
-
-        // 3. Immediately respond to the client with the Job ID
-        res.status(202).json({ jobId });
-
-    } catch (error) {
-        console.error('Error submitting job to QStash:', error);
-        res.status(500).json({ message: 'Failed to submit job for processing.' });
-    }
+    return res.status(202).json({ jobId: job.id });
+  } catch (error) {
+    console.error('Error in /api/generate:', error);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
 }
