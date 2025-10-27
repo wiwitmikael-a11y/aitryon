@@ -1,42 +1,58 @@
 import React from 'react';
-import { DownloadIcon } from './icons/DownloadIcon';
+import type { HistoryItem } from '../types';
 import { ReuseIcon } from './icons/ReuseIcon';
 import { DeleteIcon } from './icons/DeleteIcon';
-import type { HistoryItem } from '../types';
+import { DownloadIcon } from './icons/DownloadIcon';
 
 interface HistoryItemCardProps {
-    item: HistoryItem;
-    onReuse: () => void;
-    onDelete: () => void;
+  item: HistoryItem;
+  onReuse: () => void;
+  onDelete: () => void;
 }
 
 const HistoryItemCard: React.FC<HistoryItemCardProps> = ({ item, onReuse, onDelete }) => {
-    
-    const handleDownload = () => {
-        const link = document.createElement('a');
-        link.href = item.resultImage;
-        link.download = `vto-result-${item.id}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    };
+  const handleDownload = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const link = document.createElement('a');
+    link.href = item.resultImage;
+    link.download = `try-on-${item.id.substring(0, 8)}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-    return (
-        <div className="group relative bg-slate-700/50 rounded-lg overflow-hidden shadow-md">
-            <img src={item.resultImage} alt={`Generated result ${item.id}`} className="w-full aspect-[4/5] object-cover"/>
-            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex justify-center items-center gap-4">
-                <button onClick={handleDownload} title="Download" className="p-3 text-white hover:text-cyan-400 transition-colors rounded-full bg-slate-900/50 hover:bg-slate-800/70">
-                    <DownloadIcon />
-                </button>
-                <button onClick={onReuse} title="Reuse Images" className="p-3 text-white hover:text-cyan-400 transition-colors rounded-full bg-slate-900/50 hover:bg-slate-800/70">
-                    <ReuseIcon />
-                </button>
-                <button onClick={onDelete} title="Delete" className="p-3 text-white hover:text-red-500 transition-colors rounded-full bg-slate-900/50 hover:bg-slate-800/70">
-                    <DeleteIcon />
-                </button>
-            </div>
+  const handleReuseClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onReuse();
+  }
+
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onDelete();
+  }
+
+  return (
+    <div className="group relative aspect-[4/5] bg-slate-800 rounded-lg overflow-hidden shadow-lg cursor-pointer">
+      <img src={item.resultImage} alt="Generated try-on" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
+        <div className="flex justify-end gap-2">
+           <button onClick={handleDownload} className="p-2 rounded-full bg-slate-700/80 hover:bg-green-600 text-white transition-colors" title="Download">
+            <DownloadIcon />
+          </button>
+          <button onClick={handleReuseClick} className="p-2 rounded-full bg-slate-700/80 hover:bg-cyan-600 text-white transition-colors" title="Reuse Images">
+            <ReuseIcon />
+          </button>
+          <button onClick={handleDeleteClick} className="p-2 rounded-full bg-slate-700/80 hover:bg-red-600 text-white transition-colors" title="Delete">
+            <DeleteIcon />
+          </button>
         </div>
-    );
+        <div className="flex gap-1 p-1 bg-black/50 rounded-md">
+            <img src={item.personImage} alt="Person" className="w-8 h-8 object-cover rounded-sm border-2 border-slate-500" />
+            <img src={item.productImage} alt="Product" className="w-8 h-8 object-cover rounded-sm border-2 border-slate-500" />
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default HistoryItemCard;

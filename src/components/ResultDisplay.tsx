@@ -1,18 +1,18 @@
 import React from 'react';
 import { SpinnerIcon } from './icons/SpinnerIcon';
-import type { Job } from '../types';
 
 interface ResultDisplayProps {
-  job: Job | null;
+  generatedImage: string | null;
+  isLoading: boolean;
   error: string | null;
 }
 
-const ResultDisplay: React.FC<ResultDisplayProps> = ({ job, error }) => {
+const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, isLoading, error }) => {
   const handleDownload = () => {
-    if (job?.resultImage) {
+    if (generatedImage) {
       const link = document.createElement('a');
-      link.href = job.resultImage;
-      link.download = `vto-result-${job.id}.png`;
+      link.href = generatedImage;
+      link.download = 'virtual-try-on-result.png';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -20,47 +20,14 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ job, error }) => {
   };
 
   const renderContent = () => {
-    if (job) {
-       switch (job.status) {
-        case 'PENDING':
-        case 'PROCESSING':
-            return (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                    <SpinnerIcon />
-                    <p className="text-slate-400 mt-4 text-lg">Processing in the background...</p>
-                    <p className="text-slate-500 text-sm">You can wait here or close the window. The result will appear in your history.</p>
-                </div>
-            );
-        case 'COMPLETED':
-             if (job.resultImage) {
-                return (
-                    <div className="flex flex-col items-center gap-4">
-                        <img
-                            src={job.resultImage}
-                            alt="Generated virtual try-on"
-                            className="w-full h-auto max-h-[60vh] object-contain rounded-lg shadow-2xl"
-                        />
-                        <button
-                          onClick={handleDownload}
-                          className="mt-4 bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-full transition-colors duration-300"
-                        >
-                          Download Image
-                        </button>
-                    </div>
-                );
-             }
-            // Fallthrough to error if no result image
-        case 'FAILED':
-             return (
-                 <div className="flex flex-col items-center justify-center h-full text-center bg-red-900/20 p-4 rounded-lg">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <p className="text-red-400 mt-4 font-semibold">Job Failed</p>
-                    <p className="text-slate-300 mt-2 text-sm break-words">{job.error || 'An unknown error occurred.'}</p>
-                 </div>
-             );
-       }
+    if (isLoading) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-center">
+          <SpinnerIcon />
+          <p className="text-slate-400 mt-4 text-lg">Generating your image...</p>
+          <p className="text-slate-500 text-sm">This may take a moment.</p>
+        </div>
+      );
     }
 
     if (error) {
@@ -71,6 +38,24 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ job, error }) => {
            </svg>
           <p className="text-red-400 mt-4 font-semibold">An Error Occurred</p>
           <p className="text-slate-300 mt-2 text-sm break-words">{error}</p>
+        </div>
+      );
+    }
+
+    if (generatedImage) {
+      return (
+        <div className="flex flex-col items-center gap-4">
+            <img
+                src={generatedImage}
+                alt="Generated virtual try-on"
+                className="w-full h-auto max-h-[60vh] object-contain rounded-lg shadow-2xl"
+            />
+            <button
+              onClick={handleDownload}
+              className="mt-4 bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-full transition-colors duration-300"
+            >
+              Download Image
+            </button>
         </div>
       );
     }
