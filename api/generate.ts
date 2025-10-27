@@ -1,91 +1,49 @@
-// api/generate.ts
-import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse } from '../src/types';
-import { API_ENDPOINT } from '../src/constants';
+import { kv } from '@vercel/kv';
+import { nanoid } from 'nanoid';
+import { Client } from '@upstash/qstash';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { Job } from '../src/types';
 
-// This is a Vercel Edge Function, which runs on a Node.js-like environment.
-export const config = {
-  runtime: 'edge',
-};
+const qstashClient = new Client({
+  token: process.env.QSTASH_TOKEN!,
+});
 
-// Helper to remove the data URL prefix
-const getBase64Data = (dataUrl: string): string => {
-  const parts = dataUrl.split(',');
-  return parts.length === 2 ? parts[1] : dataUrl;
-};
-
-export default async function handler(request: Request) {
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method Not Allowed' });
   }
 
   try {
-    const { personImageBase64, productImageBase64, restrictToAdult } = await request.json();
-
-    if (!personImageBase64 || !productImageBase64) {
-      return new Response(JSON.stringify({ error: 'Missing image data' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
+    const { personImage, productImage, restrictToAdult } = req.body;
+    if (!personImage || !productImage) {
+      return res.status(400).json({ message: 'Missing person or product image data.' });
     }
 
-    // Securely get the API key from server-side environment variables
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-      console.error('API_KEY is not set on the server.');
-      return new Response(JSON.stringify({ error: 'Server configuration error: API key missing.' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    
-    const instance: VertexAIRequestInstance = {
-      personImage: { image: { bytesBase64Encoded: getBase64Data(personImageBase64) } },
-      productImages: [{ image: { bytesBase64Encoded: getBase64Data(productImageBase64) } }],
+    const jobId = nanoid();
+    const appUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+
+    const newJob: Job = {
+      id: jobId,
+      status: 'PENDING',
+      personImage,
+      productImage,
+      createdAt: Date.now(),
     };
 
-    const parameters: VertexAIRequestParameters = {
-      sampleCount: 1,
-      personGeneration: restrictToAdult ? 'allow_adult' : 'allow_all', // Updated logic
-    };
+    // Store the initial job state in KV
+    await kv.set(`job:${jobId}`, newJob, { ex: 86400 }); // Expire in 24 hours
 
-    const body = JSON.stringify({ instances: [instance], parameters });
-
-    // Call the actual Vertex AI API from the server
-    const apiResponse = await fetch(API_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json; charset=utf-8',
-      },
-      body,
+    // Publish to QStash to be processed by the worker
+    await qstashClient.publishJSON({
+      url: `${appUrl}/api/process-job`,
+      body: { jobId, restrictToAdult },
+      retries: 3,
     });
 
-    if (!apiResponse.ok) {
-      const errorBody = await apiResponse.json().catch(() => ({ error: { message: 'Failed to parse error response from Google API' }}));
-      console.error('Google API Error:', errorBody);
-      const errorMessage = errorBody.error?.message || 'Unknown error from Google API';
-      return new Response(JSON.stringify({ error: `API request failed: ${errorMessage}` }), {
-        status: apiResponse.status,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+    res.status(202).json({ jobId });
 
-    const data: VertexAIResponse = await apiResponse.json();
-
-    // Send the successful response back to the frontend
-    return new Response(JSON.stringify(data), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-  } catch (err) {
-    console.error('Internal Server Error:', err);
-    return new Response(JSON.stringify({ error: 'An unexpected error occurred on the server.' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+  } catch (error) {
+    console.error('Error submitting job:', error);
+    res.status(500).json({ message: 'Failed to submit job for processing.' });
   }
 }

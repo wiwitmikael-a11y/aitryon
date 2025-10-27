@@ -1,37 +1,42 @@
-// src/services/vertexAIService.ts
-import type { VertexAIResponse } from '../types';
+import type { SubmitJobResponse, JobStatusResponse } from '../types';
 
-export const generateTryOnImage = async (
+const getBase64Data = (dataUrl: string): string => {
+  const parts = dataUrl.split(',');
+  return parts.length === 2 ? parts[1] : dataUrl;
+};
+
+export const submitGenerationJob = async (
   personImageBase64: string,
   productImageBase64: string,
-  restrictToAdult: boolean
-): Promise<string> => {
-  // The frontend now calls our own secure backend endpoint
+  allowAdult: boolean
+): Promise<SubmitJobResponse> => {
   const response = await fetch('/api/generate', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      personImageBase64,
-      productImageBase64,
-      restrictToAdult, // Updated parameter name
+      personImage: getBase64Data(personImageBase64),
+      productImage: getBase64Data(productImageBase64),
+      restrictToAdult: allowAdult,
     }),
   });
 
-  const data = await response.json();
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ message: 'Failed to submit job.' }));
+    throw new Error(errorData.message || 'Unknown error occurred while submitting the job.');
+  }
+
+  return response.json() as Promise<SubmitJobResponse>;
+};
+
+export const checkJobStatus = async (jobId: string): Promise<JobStatusResponse> => {
+  const response = await fetch(`/api/status?jobId=${jobId}`);
 
   if (!response.ok) {
-    // The error message now comes from our backend proxy
-    throw new Error(data.error || 'An unknown error occurred.');
+    const errorData = await response.json().catch(() => ({ message: 'Failed to check job status.' }));
+    throw new Error(errorData.message || 'Unknown error occurred while checking job status.');
   }
 
-  const responseData = data as VertexAIResponse;
-
-  if (!responseData.predictions || responseData.predictions.length === 0 || !responseData.predictions[0].bytesBase64Encoded) {
-    throw new Error('No valid predictions returned from the backend.');
-  }
-
-  const firstPrediction = responseData.predictions[0];
-  return `data:${firstPrediction.mimeType};base64,${firstPrediction.bytesBase64Encoded}`;
+  return response.json() as Promise<JobStatusResponse>;
 };

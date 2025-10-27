@@ -1,19 +1,29 @@
-import React, { useRef, useState, useCallback, ChangeEvent } from 'react';
+import React, { useRef, useState, useCallback, ChangeEvent, useEffect } from 'react';
 import { UploadIcon } from './icons/UploadIcon';
-import CropperModal from './CropperModal';
-import { getCroppedImg } from '../utils/imageUtils';
 
 interface ImageUploaderProps {
-  onImageUpload: (base64: string) => void;
+  onImageUpload: (base64: string | null) => void;
   label: string;
-  helperText?: string;
-  croppable?: boolean;
+  value: string | null;
 }
 
-const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, helperText, croppable = false }) => {
+const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, value }) => {
   const [preview, setPreview] = useState<string | null>(null);
-  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (value) {
+       // Check if value is a base64 string, if so, we can use it directly
+       if (value.startsWith('data:image')) {
+          setPreview(value);
+       } else {
+         // This case might not be needed if we always pass base64
+         setPreview(value);
+       }
+    } else {
+        setPreview(null);
+    }
+  }, [value]);
 
   const handleFileChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -21,33 +31,11 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, hel
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64String = reader.result as string;
-        if (croppable) {
-          setImageToCrop(base64String);
-        } else {
-          setPreview(URL.createObjectURL(file));
-          onImageUpload(base64String);
-        }
+        onImageUpload(base64String);
       };
       reader.readAsDataURL(file);
     }
-  }, [onImageUpload, croppable]);
-  
-  const handleCropComplete = useCallback(async (croppedAreaPixels: any) => {
-    if (imageToCrop) {
-      try {
-        const croppedImageBase64 = await getCroppedImg(imageToCrop, croppedAreaPixels);
-        setPreview(croppedImageBase64);
-        onImageUpload(croppedImageBase64);
-        setImageToCrop(null); 
-      } catch (e) {
-        console.error(e);
-        // Fallback to original image if crop fails
-        setPreview(imageToCrop);
-        onImageUpload(imageToCrop);
-        setImageToCrop(null);
-      }
-    }
-  }, [imageToCrop, onImageUpload]);
+  }, [onImageUpload]);
 
   const handleClick = () => {
     inputRef.current?.click();
@@ -55,8 +43,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, hel
 
   const handleClear = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setPreview(null);
-    onImageUpload('');
+    onImageUpload(null);
     if (inputRef.current) {
         inputRef.current.value = '';
     }
@@ -81,8 +68,8 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, hel
         ) : (
           <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
             <UploadIcon />
-            <p className="mb-2 text-sm text-slate-400 px-2">
-              <span className="font-semibold">Click to upload</span>
+            <p className="mb-2 text-sm text-slate-400">
+              <span className="font-semibold">Click to upload</span> or drag and drop
             </p>
             <p className="text-xs text-slate-500">PNG, JPG, or WEBP</p>
           </div>
@@ -95,14 +82,6 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, hel
           onChange={handleFileChange}
         />
       </div>
-       {helperText && <p className="text-xs text-slate-500 mt-2 text-center">{helperText}</p>}
-       {imageToCrop && (
-        <CropperModal
-          imageSrc={imageToCrop}
-          onCropComplete={handleCropComplete}
-          onClose={() => setImageToCrop(null)}
-        />
-      )}
     </div>
   );
 };
