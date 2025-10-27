@@ -18,7 +18,8 @@
     "google-auth-library": "^10.4.2",
     "@upstash/qstash": "^2.8.4",
     "uuid": "^13.0.0",
-    "next": "^16.0.0"
+    "next": "^16.0.0",
+    "crypto": "^1.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

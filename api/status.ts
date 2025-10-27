@@ -1,14 +1,8 @@
+// This is a serverless function that acts as the API endpoint for checking a job's status.
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getJob } from './lib/db';
+import { db } from './lib/db';
 
-/**
- * API route to check the status of a job.
- * It retrieves the job from the in-memory store and returns it.
- */
-export default function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', ['GET']);
     return res.status(405).json({ message: 'Method Not Allowed' });
@@ -16,20 +10,15 @@ export default function handler(
 
   const { jobId } = req.query;
 
-  if (typeof jobId !== 'string' || !jobId) {
-    return res.status(400).json({ message: 'Query parameter "jobId" is required.' });
+  if (!jobId || typeof jobId !== 'string') {
+    return res.status(400).json({ message: 'jobId query parameter is required' });
   }
 
-  try {
-    const job = getJob(jobId);
+  const job = await db.get(jobId);
 
-    if (!job) {
-      return res.status(404).json({ message: `Job with ID "${jobId}" not found.` });
-    }
-
-    return res.status(200).json({ job });
-  } catch (error) {
-    console.error(`Error fetching status for job ${jobId}:`, error);
-    return res.status(500).json({ message: 'Internal Server Error' });
+  if (!job) {
+    return res.status(404).json({ message: 'Job not found' });
   }
+
+  res.status(200).json({ job });
 }

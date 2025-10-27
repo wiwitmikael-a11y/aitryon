@@ -1,35 +1,28 @@
-import { getJob, updateJob } from './lib/db';
+// This module contains the core logic for processing a generation job.
+import { db } from './lib/db';
 import { getGoogleAuthToken } from './lib/google-auth';
 import { API_ENDPOINT } from '../src/constants';
 import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse } from '../src/types';
 
-/**
- * Removes the data URL prefix from a base64 string.
- * @param dataUrl - The base64 string with a data URL prefix.
- * @returns The raw base64 data.
- */
+// Helper to remove the data URL prefix if it exists, as the API expects raw base64 data.
 const getBase64Data = (dataUrl: string): string => {
-  if (dataUrl.includes(',')) {
-    return dataUrl.split(',')[1];
+  const parts = dataUrl.split(',');
+  if (parts.length === 2) {
+    return parts[1];
   }
-  return dataUrl;
+  return dataUrl; // Assume it's already just base64 data
 };
 
-/**
- * Processes a single virtual try-on job.
- * This function is designed to be called asynchronously.
- * It fetches data, calls the Vertex AI API, and updates the job status.
- * @param jobId - The ID of the job to process.
- */
 export async function processJob(jobId: string): Promise<void> {
-  const job = getJob(jobId);
+  const job = await db.get(jobId);
   if (!job) {
-    console.error(`Job not found: ${jobId}`);
+    console.error(`[Job ${jobId}] Job not found in DB.`);
     return;
   }
 
   try {
-    updateJob(jobId, { status: 'PROCESSING' });
+    console.log(`[Job ${jobId}] Starting processing.`);
+    await db.update(jobId, { status: 'PROCESSING' });
 
     const authToken = await getGoogleAuthToken();
     
@@ -37,17 +30,32 @@ export async function processJob(jobId: string): Promise<void> {
     const productImageData = getBase64Data(job.productImage);
 
     const instance: VertexAIRequestInstance = {
-      personImage: { image: { bytesBase64Encoded: personImageData } },
-      productImages: [{ image: { bytesBase64Encoded: productImageData } }],
+      personImage: {
+        image: {
+          bytesBase64Encoded: personImageData,
+        },
+      },
+      productImages: [
+        {
+          image: {
+            bytesBase64Encoded: productImageData,
+          },
+        },
+      ],
     };
 
+    // The new UI doesn't have an "allow adult" toggle. Defaulting to 'allow_all'.
     const parameters: VertexAIRequestParameters = {
       sampleCount: 1,
-      personGeneration: 'allow_all', // Defaulting to 'allow_all' as no UI option is present in the async version
+      personGeneration: 'allow_all',
     };
 
-    const body = JSON.stringify({ instances: [instance], parameters });
-  
+    const body = JSON.stringify({
+      instances: [instance],
+      parameters: parameters,
+    });
+
+    console.log(`[Job ${jobId}] Sending request to Vertex AI endpoint.`);
     const response = await fetch(API_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -59,23 +67,26 @@ export async function processJob(jobId: string): Promise<void> {
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
-      const errorMessage = errorBody.error?.message || `API request failed with status ${response.status}`;
-      throw new Error(errorMessage);
+      console.error(`[Job ${jobId}] API Error:`, errorBody);
+      throw new Error(`API request failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
     }
 
     const data: VertexAIResponse = await response.json();
+    console.log(`[Job ${jobId}] Received response from Vertex AI.`);
 
-    if (!data.predictions?.[0]?.bytesBase64Encoded) {
+    if (!data.predictions || data.predictions.length === 0 || !data.predictions[0].bytesBase64Encoded) {
       throw new Error('No predictions returned from the API.');
     }
 
-    const prediction = data.predictions[0];
-    const resultImage = `data:${prediction.mimeType};base64,${prediction.bytesBase64Encoded}`;
+    const firstPrediction = data.predictions[0];
+    const resultImage = `data:${firstPrediction.mimeType};base64,${firstPrediction.bytesBase64Encoded}`;
 
-    updateJob(jobId, { status: 'COMPLETED', resultImage });
+    await db.update(jobId, { status: 'COMPLETED', resultImage: resultImage });
+    console.log(`[Job ${jobId}] Job completed successfully.`);
 
-  } catch (error: any) {
-    console.error(`Error processing job ${jobId}:`, error);
-    updateJob(jobId, { status: 'FAILED', error: error.message || 'An unknown error occurred' });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during processing.';
+    console.error(`[Job ${jobId}] Job failed:`, errorMessage);
+    await db.update(jobId, { status: 'FAILED', error: errorMessage });
   }
 }
