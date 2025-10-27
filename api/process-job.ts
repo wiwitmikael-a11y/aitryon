@@ -1,10 +1,10 @@
-// This module contains the core logic for processing a generation job.
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db } from './lib/db';
 import { getGoogleAuthToken } from './lib/google-auth';
 import { API_ENDPOINT } from '../src/constants';
 import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse } from '../src/types';
 
-// Helper to remove the data URL prefix if it exists, as the API expects raw base64 data.
+// Helper to remove the data URL prefix if it exists
 const getBase64Data = (dataUrl: string): string => {
   const parts = dataUrl.split(',');
   if (parts.length === 2) {
@@ -13,15 +13,30 @@ const getBase64Data = (dataUrl: string): string => {
   return dataUrl; // Assume it's already just base64 data
 };
 
-export async function processJob(jobId: string): Promise<void> {
-  const job = await db.get(jobId);
-  if (!job) {
-    console.error(`[Job ${jobId}] Job not found in DB.`);
-    return;
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse,
+) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method Not Allowed' });
   }
 
+  const { jobId } = req.body;
+
+  if (!jobId || typeof jobId !== 'string') {
+    return res.status(400).json({ message: 'Missing or invalid jobId' });
+  }
+  
+  // Respond quickly to the caller (generate.ts) to not block it.
+  res.status(202).end();
+
   try {
-    console.log(`[Job ${jobId}] Starting processing.`);
+    const job = await db.get(jobId);
+    if (!job) {
+      console.error(`Job not found: ${jobId}`);
+      return;
+    }
+
     await db.update(jobId, { status: 'PROCESSING' });
 
     const authToken = await getGoogleAuthToken();
@@ -44,10 +59,9 @@ export async function processJob(jobId: string): Promise<void> {
       ],
     };
 
-    // The new UI doesn't have an "allow adult" toggle. Defaulting to 'allow_all'.
     const parameters: VertexAIRequestParameters = {
       sampleCount: 1,
-      personGeneration: 'allow_all',
+      personGeneration: 'allow_all', 
     };
 
     const body = JSON.stringify({
@@ -55,7 +69,6 @@ export async function processJob(jobId: string): Promise<void> {
       parameters: parameters,
     });
 
-    console.log(`[Job ${jobId}] Sending request to Vertex AI endpoint.`);
     const response = await fetch(API_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -67,12 +80,10 @@ export async function processJob(jobId: string): Promise<void> {
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
-      console.error(`[Job ${jobId}] API Error:`, errorBody);
       throw new Error(`API request failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
     }
 
     const data: VertexAIResponse = await response.json();
-    console.log(`[Job ${jobId}] Received response from Vertex AI.`);
 
     if (!data.predictions || data.predictions.length === 0 || !data.predictions[0].bytesBase64Encoded) {
       throw new Error('No predictions returned from the API.');
@@ -80,13 +91,12 @@ export async function processJob(jobId: string): Promise<void> {
 
     const firstPrediction = data.predictions[0];
     const resultImage = `data:${firstPrediction.mimeType};base64,${firstPrediction.bytesBase64Encoded}`;
-
-    await db.update(jobId, { status: 'COMPLETED', resultImage: resultImage });
-    console.log(`[Job ${jobId}] Job completed successfully.`);
+    
+    await db.update(jobId, { status: 'COMPLETED', resultImage });
 
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during processing.';
-    console.error(`[Job ${jobId}] Job failed:`, errorMessage);
+    const errorMessage = error instanceof Error ? error.message : 'An unknown processing error occurred.';
+    console.error(`Error processing job ${jobId}:`, error);
     await db.update(jobId, { status: 'FAILED', error: errorMessage });
   }
 }
