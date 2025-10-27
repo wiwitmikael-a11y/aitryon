@@ -1,3 +1,4 @@
+// FIX: Restored file content that was corrupted, causing it to be an invalid module.
 import React, { useState, useCallback } from 'react';
 import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';

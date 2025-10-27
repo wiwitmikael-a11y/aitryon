@@ -1,3 +1,4 @@
+// FIX: Restored file content that was corrupted, causing compilation errors.
 import { API_ENDPOINT } from '../constants';
 import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse } from '../types';
 
@@ -18,7 +19,7 @@ export const generateTryOnImage = async (
   const apiKey = process.env.API_KEY;
 
   if (!apiKey) {
-    throw new Error('API key is not configured. Please set the API_KEY environment variable in your deployment settings.');
+    throw new Error('API key is not configured. Please set the API_KEY environment variable.');
   }
 
   // API expects base64 data without the data URI prefix
