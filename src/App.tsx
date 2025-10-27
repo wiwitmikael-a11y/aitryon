@@ -11,10 +11,8 @@ function App() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Fix: Re-introduce allowAdult state for controlling generation mode.
-  const [allowAdult, setAllowAdult] = useState(true);
+  const [restrictToAdult, setRestrictToAdult] = useState(false);
 
-  // Fix: Pass allowAdult to generateTryOnImage and add to dependency array.
   const handleGenerate = useCallback(async () => {
     if (!personImage || !productImage) {
       setError('Please upload both a person and a product image.');
@@ -26,7 +24,7 @@ function App() {
     setGeneratedImage(null);
 
     try {
-      const result = await generateTryOnImage(personImage, productImage, allowAdult);
+      const result = await generateTryOnImage(personImage, productImage, restrictToAdult);
       setGeneratedImage(result);
     } catch (err) {
       if (err instanceof Error) {
@@ -37,7 +35,7 @@ function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [personImage, productImage, allowAdult]);
+  }, [personImage, productImage, restrictToAdult]);
 
   const canGenerate = personImage && productImage && !isLoading;
 
@@ -50,20 +48,28 @@ function App() {
           <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6">
             <h2 className="text-2xl font-bold text-cyan-400">Upload Your Images</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <ImageUploader label="Person Image" onImageUpload={setPersonImage} />
-              <ImageUploader label="Clothing Item" onImageUpload={setProductImage} />
+              <ImageUploader 
+                label="Person Image" 
+                onImageUpload={setPersonImage} 
+                helperText="For best results, use a clear, front-facing photo with a simple background."
+              />
+              <ImageUploader 
+                label="Clothing Item" 
+                onImageUpload={setProductImage} 
+                helperText="Upload a photo of the clothing. You will be asked to crop the item."
+                croppable={true}
+              />
             </div>
-             {/* Fix: Re-introduce UI for setting adult generation mode. */}
              <div className="flex items-center space-x-3 mt-4 bg-slate-700/50 p-4 rounded-lg">
               <input
                 type="checkbox"
-                id="allowAdult"
-                checked={allowAdult}
-                onChange={(e) => setAllowAdult(e.target.checked)}
+                id="restrictToAdult"
+                checked={restrictToAdult}
+                onChange={(e) => setRestrictToAdult(e.target.checked)}
                 className="h-5 w-5 rounded border-gray-300 text-cyan-500 focus:ring-cyan-500 bg-slate-800"
               />
-              <label htmlFor="allowAdult" className="text-slate-300 select-none">
-                Allow Adult Generation Mode
+              <label htmlFor="restrictToAdult" className="text-slate-300 select-none">
+                Restrict Generation to Adults Only
               </label>
             </div>
           </div>

@@ -1,13 +1,18 @@
 import React, { useRef, useState, useCallback, ChangeEvent } from 'react';
 import { UploadIcon } from './icons/UploadIcon';
+import CropperModal from './CropperModal';
+import { getCroppedImg } from '../utils/imageUtils';
 
 interface ImageUploaderProps {
   onImageUpload: (base64: string) => void;
   label: string;
+  helperText?: string;
+  croppable?: boolean;
 }
 
-const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label }) => {
+const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, helperText, croppable = false }) => {
   const [preview, setPreview] = useState<string | null>(null);
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
@@ -16,12 +21,33 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label }) =
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64String = reader.result as string;
-        setPreview(URL.createObjectURL(file));
-        onImageUpload(base64String);
+        if (croppable) {
+          setImageToCrop(base64String);
+        } else {
+          setPreview(URL.createObjectURL(file));
+          onImageUpload(base64String);
+        }
       };
       reader.readAsDataURL(file);
     }
-  }, [onImageUpload]);
+  }, [onImageUpload, croppable]);
+  
+  const handleCropComplete = useCallback(async (croppedAreaPixels: any) => {
+    if (imageToCrop) {
+      try {
+        const croppedImageBase64 = await getCroppedImg(imageToCrop, croppedAreaPixels);
+        setPreview(croppedImageBase64);
+        onImageUpload(croppedImageBase64);
+        setImageToCrop(null); 
+      } catch (e) {
+        console.error(e);
+        // Fallback to original image if crop fails
+        setPreview(imageToCrop);
+        onImageUpload(imageToCrop);
+        setImageToCrop(null);
+      }
+    }
+  }, [imageToCrop, onImageUpload]);
 
   const handleClick = () => {
     inputRef.current?.click();
@@ -55,8 +81,8 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label }) =
         ) : (
           <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
             <UploadIcon />
-            <p className="mb-2 text-sm text-slate-400">
-              <span className="font-semibold">Click to upload</span> or drag and drop
+            <p className="mb-2 text-sm text-slate-400 px-2">
+              <span className="font-semibold">Click to upload</span>
             </p>
             <p className="text-xs text-slate-500">PNG, JPG, or WEBP</p>
           </div>
@@ -69,6 +95,14 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label }) =
           onChange={handleFileChange}
         />
       </div>
+       {helperText && <p className="text-xs text-slate-500 mt-2 text-center">{helperText}</p>}
+       {imageToCrop && (
+        <CropperModal
+          imageSrc={imageToCrop}
+          onCropComplete={handleCropComplete}
+          onClose={() => setImageToCrop(null)}
+        />
+      )}
     </div>
   );
 };

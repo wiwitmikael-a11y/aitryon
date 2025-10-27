@@ -22,7 +22,7 @@ export default async function handler(request: Request) {
   }
 
   try {
-    const { personImageBase64, productImageBase64, allowAdult } = await request.json();
+    const { personImageBase64, productImageBase64, restrictToAdult } = await request.json();
 
     if (!personImageBase64 || !productImageBase64) {
       return new Response(JSON.stringify({ error: 'Missing image data' }), {
@@ -48,7 +48,7 @@ export default async function handler(request: Request) {
 
     const parameters: VertexAIRequestParameters = {
       sampleCount: 1,
-      personGeneration: allowAdult ? 'allow_adult' : 'allow_all',
+      personGeneration: restrictToAdult ? 'allow_adult' : 'allow_all', // Updated logic
     };
 
     const body = JSON.stringify({ instances: [instance], parameters });

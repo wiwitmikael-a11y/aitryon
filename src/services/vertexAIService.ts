@@ -4,7 +4,7 @@ import type { VertexAIResponse } from '../types';
 export const generateTryOnImage = async (
   personImageBase64: string,
   productImageBase64: string,
-  allowAdult: boolean
+  restrictToAdult: boolean
 ): Promise<string> => {
   // The frontend now calls our own secure backend endpoint
   const response = await fetch('/api/generate', {
@@ -15,7 +15,7 @@ export const generateTryOnImage = async (
     body: JSON.stringify({
       personImageBase64,
       productImageBase64,
-      allowAdult,
+      restrictToAdult, // Updated parameter name
     }),
   });
 
