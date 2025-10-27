@@ -16,7 +16,8 @@
     "nanoid": "^5.1.6",
     "@vercel/kv": "^3.0.0",
     "google-auth-library": "^10.4.2",
-    "@upstash/qstash": "^2.8.4"
+    "@upstash/qstash": "^2.8.4",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

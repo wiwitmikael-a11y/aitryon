@@ -1,85 +1,105 @@
 import { kv } from '@vercel/kv';
-import { getGoogleAuthToken } from './lib/google-auth';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { Job } from '../src/types';
+import type { Job, VertexAIResponse } from '../src/types';
+import { getGoogleAuthToken } from './lib/google-auth';
+import { API_ENDPOINT } from '../src/constants';
 
-// Constants from the old constants.ts file, now server-side only
-const VERTEX_AI_LOCATION = 'us-central1';
-const VERTEX_AI_PROJECT_ID = 'gen-lang-client-0513612665';
-const MODEL_ID = 'virtual-try-on-preview-08-04';
-const API_ENDPOINT = `https://${VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_AI_PROJECT_ID}/locations/${VERTEX_AI_LOCATION}/publishers/google/models/${MODEL_ID}:predict`;
-
-async function runPrediction(job: Job, restrictToAdult: boolean): Promise<string> {
-  const authToken = await getGoogleAuthToken();
-  
-  const body = {
-    instances: [{
-      personImage: { image: { bytesBase64Encoded: job.personImage } },
-      productImages: [{ image: { bytesBase64Encoded: job.productImage } }],
-    }],
-    parameters: {
-      sampleCount: 1,
-      personGeneration: restrictToAdult ? 'allow_adult' : 'allow_all',
-    },
-  };
-
-  const response = await fetch(API_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${authToken}`,
-      'Content-Type': 'application/json; charset=utf-8',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    console.error('Vertex AI API Error:', errorBody);
-    throw new Error(`API request failed: ${errorBody?.error?.message || response.statusText}`);
+const getBase64Data = (dataUrl: string): string => {
+  const parts = dataUrl.split(',');
+  if (parts.length === 2) {
+    return parts[1];
   }
+  return dataUrl;
+};
 
-  const data = await response.json();
-  const prediction = data.predictions?.[0];
-  if (!prediction?.bytesBase64Encoded) {
-    throw new Error('No image data in API response.');
-  }
-  
-  return `data:${prediction.mimeType};base64,${prediction.bytesBase64Encoded}`;
-}
+// Vercel's Edge runtime doesn't support the 'body' property directly from QStash.
+// We need to parse it manually if using the edge. For serverless, it's fine.
+export const config = {
+  // api: { bodyParser: true }, // Default is true, so this is not needed
+};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method Not Allowed' });
-  }
-
-  const { jobId, restrictToAdult } = req.body;
-  if (!jobId) {
-    return res.status(400).json({ message: 'Job ID is missing.' });
-  }
-
-  try {
-    const job = await kv.get<Job>(`job:${jobId}`);
-    if (!job) {
-      return res.status(404).json({ message: `Job ${jobId} not found.` });
+    if (req.method !== 'POST') {
+        return res.status(405).json({ message: 'Method Not Allowed' });
     }
+    
+    // For production, you should verify the QStash signature here for security
+    // See: https://upstash.com/docs/qstash/features/verification
 
-    await kv.set(`job:${jobId}`, { ...job, status: 'PROCESSING' });
+    const { jobId } = req.body;
 
+    if (!jobId) {
+        return res.status(400).json({ message: 'Job ID is required.' });
+    }
+    
+    // Respond quickly to QStash to acknowledge receipt of the job.
+    res.status(202).json({ message: 'Processing started.' });
+
+    let job: Job | null = null;
     try {
-      const resultImage = await runPrediction(job, restrictToAdult);
-      await kv.set(`job:${jobId}`, { ...job, status: 'COMPLETED', resultImage });
-      res.status(200).json({ message: 'Job processed successfully.' });
+        job = await kv.get<Job>(`job:${jobId}`);
+        if (!job) {
+            console.error(`Job not found in KV: ${jobId}`);
+            return; // Stop processing if job doesn't exist
+        }
 
-    } catch (predictionError) {
-      const errorMessage = predictionError instanceof Error ? predictionError.message : 'Unknown prediction error';
-      await kv.set(`job:${jobId}`, { ...job, status: 'FAILED', error: errorMessage });
-      // We still return 200 to QStash to prevent retries for a failed job.
-      // The failure is recorded in our KV store for the user to see.
-      res.status(200).json({ message: `Job failed: ${errorMessage}` });
+        if (job.status !== 'PENDING') {
+            console.log(`Job ${jobId} is not pending, skipping.`);
+            return;
+        }
+
+        job.status = 'PROCESSING';
+        await kv.set(`job:${jobId}`, job);
+
+        const authToken = await getGoogleAuthToken();
+        
+        const personImageData = getBase64Data(job.personImage);
+        const productImageData = getBase64Data(job.productImage);
+        
+        const body = JSON.stringify({
+            instances: [{
+                personImage: { image: { bytesBase64Encoded: personImageData } },
+                productImages: [{ image: { bytesBase64Encoded: productImageData } }],
+            }],
+            parameters: {
+                sampleCount: 1,
+                personGeneration: 'allow_all', // Hardcoded as per user request
+            },
+        });
+
+        const apiResponse = await fetch(API_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json; charset=utf-8',
+            },
+            body,
+        });
+
+        if (!apiResponse.ok) {
+            const errorBody = await apiResponse.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
+            throw new Error(`API request failed with status ${apiResponse.status}: ${errorBody.error?.message || 'Unknown error'}`);
+        }
+        
+        const data: VertexAIResponse = await apiResponse.json();
+        
+        if (!data.predictions || data.predictions.length === 0 || !data.predictions[0].bytesBase64Encoded) {
+            throw new Error('No predictions returned from the API.');
+        }
+
+        const firstPrediction = data.predictions[0];
+        const resultImage = `data:${firstPrediction.mimeType};base64,${firstPrediction.bytesBase64Encoded}`;
+
+        job.status = 'COMPLETED';
+        job.resultImage = resultImage;
+        await kv.set(`job:${jobId}`, job);
+
+    } catch (error: any) {
+        console.error(`Error processing job ${jobId}:`, error);
+        if (job) {
+            job.status = 'FAILED';
+            job.error = error.message || 'An unknown error occurred.';
+            await kv.set(`job:${jobId}`, job);
+        }
     }
-  } catch (error) {
-    console.error('General processing error:', error);
-    // If we can't even fetch the job, it's a server error. QStash might retry this.
-    res.status(500).json({ message: 'Failed to process job.' });
-  }
 }

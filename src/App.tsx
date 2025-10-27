@@ -4,162 +4,162 @@ import ImageUploader from './components/ImageUploader';
 import ResultDisplay from './components/ResultDisplay';
 import Footer from './components/Footer';
 import HistoryGallery from './components/HistoryGallery';
+import GuideModal from './components/GuideModal';
 import { submitGenerationJob, checkJobStatus } from './services/vertexAIService';
-import type { HistoryItem, Job } from './types';
-
-const POLLING_INTERVAL = 3000; // Poll every 3 seconds
+import type { Job, HistoryItem } from './types';
 
 function App() {
   const [personImage, setPersonImage] = useState<string | null>(null);
   const [productImage, setProductImage] = useState<string | null>(null);
-  const [activeJob, setActiveJob] = useState<Job | null>(null);
+  const [currentJob, setCurrentJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [allowAdult, setAllowAdult] = useState(false);
-  const [history, setHistory] = useState<HistoryItem[]>(() => {
-    try {
-      const savedHistory = localStorage.getItem('vto-history');
-      return savedHistory ? JSON.parse(savedHistory) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
 
   const pollingIntervalRef = useRef<number | null>(null);
 
-  const saveHistory = (newHistory: HistoryItem[]) => {
-    setHistory(newHistory);
-    localStorage.setItem('vto-history', JSON.stringify(newHistory));
-  };
-
-  const handleJobCompletion = useCallback((completedJob: Job) => {
-    if (completedJob.resultImage) {
-      const newHistoryItem: HistoryItem = {
-        id: completedJob.id,
-        personImage: completedJob.personImage,
-        productImage: completedJob.productImage,
-        resultImage: completedJob.resultImage,
-        createdAt: Date.now(),
-      };
-      saveHistory([newHistoryItem, ...history]);
+  useEffect(() => {
+    try {
+      const storedHistory = localStorage.getItem('vto-history');
+      if (storedHistory) {
+        setHistory(JSON.parse(storedHistory));
+      }
+    } catch (e) {
+      console.error("Failed to load history from local storage", e);
     }
-    setActiveJob(null);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('vto-history', JSON.stringify(history));
+    } catch (e) {
+      console.error("Failed to save history to local storage", e);
+    }
   }, [history]);
+
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+  }, []);
 
   const pollJobStatus = useCallback(async (jobId: string) => {
     try {
-      const response = await checkJobStatus(jobId);
-      const job = response.job;
-      setActiveJob(job);
+      const job = await checkJobStatus(jobId);
+      setCurrentJob(job);
 
       if (job.status === 'COMPLETED' || job.status === 'FAILED') {
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current);
-          pollingIntervalRef.current = null;
+        stopPolling();
+        if (job.status === 'COMPLETED' && job.resultImage) {
+          const newHistoryItem: HistoryItem = {
+            id: job.id,
+            resultImage: job.resultImage,
+            personImage: job.personImage,
+            productImage: job.productImage,
+          };
+          setHistory(prev => [newHistoryItem, ...prev.filter(h => h.id !== newHistoryItem.id)]);
         }
-        if (job.status === 'FAILED') {
-          setError(`Job ${job.id} failed: ${job.error || 'Unknown reason'}`);
-        }
-        handleJobCompletion(job);
       }
     } catch (err) {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
+      if (err instanceof Error) {
+        setError(`Polling failed: ${err.message}`);
       }
-      setError(err instanceof Error ? err.message : 'Failed to poll job status.');
-      setActiveJob(null);
+      stopPolling();
     }
-  }, [handleJobCompletion]);
+  }, [stopPolling]);
+
+  const startPolling = useCallback((jobId: string) => {
+    stopPolling();
+    // Initial check
+    pollJobStatus(jobId);
+    // Start interval
+    pollingIntervalRef.current = window.setInterval(() => {
+      pollJobStatus(jobId);
+    }, 3000);
+  }, [pollJobStatus, stopPolling]);
 
   useEffect(() => {
-    // Cleanup interval on unmount
+    // Cleanup on unmount
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
+      stopPolling();
     };
-  }, []);
-  
+  }, [stopPolling]);
+
   const handleGenerate = useCallback(async () => {
     if (!personImage || !productImage) {
       setError('Please upload both a person and a product image.');
       return;
     }
-    if (activeJob) return;
-
+    
     setError(null);
-    setActiveJob({ id: 'temp', status: 'PENDING', personImage, productImage, createdAt: Date.now() });
+    setCurrentJob(null);
 
     try {
-      const { jobId } = await submitGenerationJob(personImage, productImage, allowAdult);
-      setActiveJob(prev => prev ? { ...prev, id: jobId, status: 'PROCESSING' } : null);
+      const { jobId } = await submitGenerationJob(personImage, productImage);
       
-      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = window.setInterval(() => {
-        pollJobStatus(jobId);
-      }, POLLING_INTERVAL);
+      const pendingJob: Job = { 
+        id: jobId, 
+        status: 'PENDING', 
+        personImage, 
+        productImage, 
+        createdAt: Date.now() 
+      };
+      setCurrentJob(pendingJob);
+      startPolling(jobId);
 
     } catch (err) {
-      setError(err instanceof Error ? `Submission failed: ${err.message}` : 'An unknown error occurred.');
-      setActiveJob(null);
+      if (err instanceof Error) {
+        setError(err.message); // Use the message directly from the service
+      } else {
+        setError('An unknown error occurred during job submission.');
+      }
     }
-  }, [personImage, productImage, allowAdult, activeJob, pollJobStatus]);
+  }, [personImage, productImage, startPolling]);
 
-  const handleReuse = (item: HistoryItem) => {
+  const handleReuse = useCallback((item: HistoryItem) => {
     setPersonImage(item.personImage);
     setProductImage(item.productImage);
+    setCurrentJob(null);
+    setError(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, []);
 
-  const handleDelete = (id: string) => {
-    saveHistory(history.filter(item => item.id !== id));
-  };
-  
-  const canGenerate = personImage && productImage && !activeJob;
+  const handleDelete = useCallback((id: string) => {
+    setHistory(prev => prev.filter(item => item.id !== id));
+  }, []);
+
+  const isLoading = currentJob?.status === 'PENDING' || currentJob?.status === 'PROCESSING';
+  const canGenerate = personImage && productImage && !isLoading;
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-900 text-slate-200 font-sans">
-      <Header />
+      <Header onOpenGuide={() => setIsGuideOpen(true)} />
+      {isGuideOpen && <GuideModal onClose={() => setIsGuideOpen(false)} />}
       <main className="flex-grow container mx-auto p-4 md:p-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6">
-            <h2 className="text-2xl font-bold text-cyan-400">Upload Your Images</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <ImageUploader label="Person Image" onImageUpload={setPersonImage} value={personImage}/>
-              <ImageUploader label="Clothing Item" onImageUpload={setProductImage} value={productImage}/>
-            </div>
-            <div className="flex items-center space-x-3 mt-4 bg-slate-700/50 p-4 rounded-lg">
-              <input
-                type="checkbox"
-                id="allowAdult"
-                checked={allowAdult}
-                onChange={(e) => setAllowAdult(e.target.checked)}
-                className="h-5 w-5 rounded border-gray-300 text-cyan-500 focus:ring-cyan-500 bg-slate-800"
-              />
-              <label htmlFor="allowAdult" className="text-slate-300 select-none">
-                Restrict Generation to Adults Only
-              </label>
+              <ImageUploader label="Person Image" onImageUpload={setPersonImage} initialImage={personImage} />
+              <ImageUploader label="Clothing Item" onImageUpload={setProductImage} initialImage={productImage} allowCropping />
             </div>
           </div>
           <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-             <h2 className="text-2xl font-bold text-cyan-400 mb-6">Generated Result</h2>
-            <ResultDisplay
-              job={activeJob}
-              error={error}
-            />
+            <h2 className="text-2xl font-bold text-cyan-400 mb-6">Generated Result</h2>
+            <ResultDisplay job={currentJob} error={error} />
           </div>
+        </div>
+        <div className="sticky bottom-0 left-0 right-0 mt-8 p-4 bg-slate-900/80 backdrop-blur-sm border-t border-slate-700/50 flex justify-center">
+          <button
+            onClick={handleGenerate}
+            disabled={!canGenerate}
+            className="w-full max-w-md bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-bold py-4 px-8 rounded-full text-lg shadow-lg shadow-cyan-500/20 transition-all duration-300 transform hover:scale-105 disabled:scale-100 disabled:shadow-none"
+          >
+            {isLoading ? 'Processing in Background...' : '✨ Perform Virtual Try-On'}
+          </button>
         </div>
         <HistoryGallery history={history} onReuse={handleReuse} onDelete={handleDelete} />
       </main>
-      <div className="sticky bottom-0 left-0 right-0 mt-8 p-4 bg-slate-900/80 backdrop-blur-sm border-t border-slate-700/50 flex justify-center">
-          <button
-              onClick={handleGenerate}
-              disabled={!canGenerate}
-              className="w-full max-w-md bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-bold py-4 px-8 rounded-full text-lg shadow-lg shadow-cyan-500/20 transition-all duration-300 transform hover:scale-105 disabled:scale-100 disabled:shadow-none"
-          >
-              {activeJob ? `Processing (${activeJob.status})...` : '✨ Perform Virtual Try-On'}
-          </button>
-      </div>
       <Footer />
     </div>
   );

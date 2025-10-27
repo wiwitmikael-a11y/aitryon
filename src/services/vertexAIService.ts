@@ -1,42 +1,30 @@
-import type { SubmitJobResponse, JobStatusResponse } from '../types';
-
-const getBase64Data = (dataUrl: string): string => {
-  const parts = dataUrl.split(',');
-  return parts.length === 2 ? parts[1] : dataUrl;
-};
+import type { Job } from '../types';
 
 export const submitGenerationJob = async (
-  personImageBase64: string,
-  productImageBase64: string,
-  allowAdult: boolean
-): Promise<SubmitJobResponse> => {
+  personImage: string,
+  productImage: string
+): Promise<{ jobId: string }> => {
   const response = await fetch('/api/generate', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      personImage: getBase64Data(personImageBase64),
-      productImage: getBase64Data(productImageBase64),
-      restrictToAdult: allowAdult,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ personImage, productImage }),
   });
 
+  const data = await response.json();
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ message: 'Failed to submit job.' }));
-    throw new Error(errorData.message || 'Unknown error occurred while submitting the job.');
+    throw new Error(data.message || 'Failed to submit job for processing.');
   }
-
-  return response.json() as Promise<SubmitJobResponse>;
+  
+  return data;
 };
 
-export const checkJobStatus = async (jobId: string): Promise<JobStatusResponse> => {
+export const checkJobStatus = async (jobId: string): Promise<Job> => {
   const response = await fetch(`/api/status?jobId=${jobId}`);
+  const data = await response.json();
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ message: 'Failed to check job status.' }));
-    throw new Error(errorData.message || 'Unknown error occurred while checking job status.');
+    throw new Error(data.message || 'Failed to fetch job status.');
   }
-
-  return response.json() as Promise<JobStatusResponse>;
+  
+  return data.job;
 };
