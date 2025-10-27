@@ -1,4 +1,3 @@
-// FIX: Restored file content that was corrupted, causing compilation errors.
 import { API_ENDPOINT } from '../constants';
 import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse } from '../types';
 
@@ -16,6 +15,7 @@ export const generateTryOnImage = async (
   productImageBase64: string,
   allowAdult: boolean
 ): Promise<string> => {
+  // FIX: Switched to process.env.API_KEY to align with coding guidelines and resolve TypeScript error.
   const apiKey = process.env.API_KEY;
 
   if (!apiKey) {
