@@ -8,12 +8,16 @@ import { SpinnerIcon } from './icons/SpinnerIcon';
 import { VideoIcon } from './icons/VideoIcon';
 import ImageUploader from './ImageUploader';
 
+// Fix: Define a named interface `AIStudio` to resolve type conflicts
+// for the global `window.aistudio` object.
+interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
 declare global {
   interface Window {
-    aistudio: {
-      hasSelectedApiKey: () => Promise<boolean>;
-      openSelectKey: () => Promise<void>;
-    };
+    aistudio: AIStudio;
   }
 }
 

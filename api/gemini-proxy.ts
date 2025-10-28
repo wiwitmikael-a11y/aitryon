@@ -79,7 +79,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     numberOfImages: 1,
                     aspectRatio: aspectRatio || '16:9',
                     outputMimeType: 'image/png',
-                    safetySettings: safetySettings,
                 }
             });
             const image = response.generatedImages[0];
@@ -175,7 +174,7 @@ PROTOKOL ANALISIS (DATA INTEGRATION):
  * Anda harus menganalisis skenario Multimodal (melihat grafik/chart, memproses teks, dan data tabular) secara simultan untuk mencari edge (keunggulan) yang tidak terlihat oleh trader manusia atau bot konvensional.
 PROTOKOL PENGAMBILAN KEPUTUSAN & KEPATUHAN (COMPLIANCE):
  * Keputusan Anda TIDAK PERNAH BOLEH melanggar batas yang ditetapkan oleh Risk Management Engine.
- * Setiap sinyal beli atau jual wajib didahului oleh langkah internal: PERIKSA KESEHATAN PORTOFOLIO SAAT INI melalui Function Calling get_portfolio_health().
+ * Setiap sinyal beli atau jual wajib didahului oleh langkah internal: PERIKSA KESEHATAN PORTOFILIO SAAT INI melalui Function Calling get_portfolio_health().
  * Anda wajib menggunakan Function Calling calculate_max_risk() untuk menentukan position size yang optimal sebelum mengajukan Mandate.
  * TIDAK ADA EKSEKUSI TANPA STOP-LOSS (S/L) DAN TAKE-PROFIT (T/P). Anda harus menentukan S/L dan T/P berdasarkan analisis volatilitas dan struktur pasar.
 PROTOKOL KOMUNIKASI DAN EKSEKUSI (THE MANDATE):
@@ -239,7 +238,6 @@ PENOLAKAN PERINTAH:
                     numberOfVideos: 1,
                     resolution: '720p',
                     aspectRatio: '16:9',
-                    safetySettings: safetySettings,
                 }
             });
             res.status(200).json(operation);

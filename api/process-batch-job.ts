@@ -49,7 +49,6 @@ export default async function handler(
                     numberOfImages: 1,
                     aspectRatio: '16:9',
                     outputMimeType: 'image/png',
-                    safetySettings: safetySettings,
                 }
             });
             const image = response.generatedImages[0];
