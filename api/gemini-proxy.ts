@@ -1,342 +1,264 @@
-// FIX: Add Buffer import for Node.js environment in Vercel.
-import { Buffer } from 'buffer';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-// FIX: Add Modality for image generation requests.
-import { GoogleGenAI, Type, Modality } from '@google/genai';
-import { getAuthToken } from './lib/google-auth';
-import {
-    VIRTUAL_TRY_ON_MODEL,
-    STOCK_PHOTO_MODEL,
-    VIDEO_GENERATION_MODEL,
-    TEXT_MODEL,
-    ADVANCED_TEXT_MODEL,
-} from './lib/constants';
+import { GoogleGenAI, Type } from "@google/genai";
+import { Buffer } from 'buffer';
+import { getGoogleAuthToken } from './lib/google-auth';
+import { VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, VEO_MODEL_ID } from '../src/constants';
 
-interface AssetMetadata {
-    title: string;
-    description: string;
-    tags: string[];
+
+// Ensure the API key is available in environment variables for non-Vertex AI calls (e.g., Gemini Flash for prompts, Imagen)
+if (!process.env.API_KEY) {
+    throw new Error("API_KEY environment variable is not set.");
 }
 
-// Moved instantiation inside handler for serverless best practices
-// const geminiAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-async function handleGenerateMetadataForAsset(
-    geminiAi: GoogleGenAI,
-    payload: { prompt: string; type: 'photo' | 'video' }
-): Promise<AssetMetadata> {
-    const { prompt, type } = payload;
-    const assetType = type === 'photo' ? 'stock photo' : 'short video';
-    const metadataPrompt = `You are a stock media specialist. Generate metadata for a ${assetType} created from the following prompt:
-"${prompt}"
-Generate a short, catchy title (max 10 words).
-Generate a concise description (max 30 words).
-Generate a list of 5-10 relevant keywords/tags.
-Return the result as a JSON object with keys: "title", "description", and "tags" (an array of strings).`;
+const VERTEX_AI_API_BASE = `https://${VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_AI_PROJECT_ID}/locations/${VERTEX_AI_LOCATION}`;
 
-    const response = await geminiAi.models.generateContent({
-        model: TEXT_MODEL,
-        contents: metadataPrompt,
+
+async function handler(req: VercelRequest, res: VercelResponse) {
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method Not Allowed' });
+    }
+
+    const { task, ...payload } = req.body;
+
+    try {
+        let result;
+        switch (task) {
+            case 'generateCreativeStrategy':
+                result = await handleGenerateCreativeStrategy(payload);
+                break;
+            case 'generateStockImage':
+                result = await handleGenerateStockImage(payload);
+                break;
+            case 'generateVideo':
+                result = await handleGenerateVideo(payload);
+                break;
+            case 'checkVideoOperationStatus':
+                result = await handleCheckVideoOperationStatus(payload);
+                break;
+            case 'fetchVideo':
+                result = await handleFetchVideo(payload);
+                break;
+            case 'generateMetadataForAsset':
+                result = await handleGenerateMetadataForAsset(payload);
+                break;
+            case 'generateCreativePrompt':
+                result = await handleGenerateCreativePrompt(payload);
+                break;
+            case 'generatePhotoShootPrompts':
+                result = await handleGeneratePhotoShootPrompts(payload);
+                break;
+            default:
+                return res.status(400).json({ error: 'Invalid task' });
+        }
+        res.status(200).json(result);
+    } catch (error) {
+        console.error(`Error in task '${task}':`, error);
+        const message = error instanceof Error ? error.message : 'An unknown server error occurred.';
+        res.status(500).json({ error: message });
+    }
+}
+
+async function handleGeneratePhotoShootPrompts(payload: any) {
+    const model = 'gemini-2.5-pro';
+    const systemInstruction = `You are a visionary Art Director for a major global brand like Apple, Nike, or Patagonia. You are planning a high-concept photo shoot.
+Your task is to create a complete, narrative-driven shot list.
+1.  **Define a Core Concept/Theme:** This should be a powerful, single-sentence idea that is commercially relevant and emotionally resonant.
+2.  **Create a Narrative Shot List:** Generate an array of exactly 10 distinct, highly-detailed prompts. These prompts are not random variations; they must follow a logical narrative sequence as if telling a story. For example: an establishing shot, a medium shot of the subject, a detail/macro shot of a key object, an action shot, an emotional portrait, an abstract shot, etc. Each prompt must be unique and contribute to the overall story of the theme.
+
+Your response MUST be a valid JSON object with two keys: "theme" (a string for the core concept) and "prompts" (an array of exactly 10 detailed string prompts).`;
+
+    const response = await ai.models.generateContent({
+        model,
+        contents: "Generate a new photo shoot concept and narrative shot list.",
+        config: { 
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    theme: { type: Type.STRING },
+                    prompts: { type: Type.ARRAY, items: { type: Type.STRING } }
+                },
+                required: ["theme", "prompts"]
+            }
+        }
+    });
+
+    try {
+        const text = response.text.trim();
+        if (!text) {
+            throw new Error("Gemini returned an empty response for photo shoot prompts.");
+        }
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Failed to parse Gemini response as JSON:", response.text);
+        throw new Error("The AI failed to generate a valid photo shoot plan. Please try again.");
+    }
+}
+
+
+// --- Task Handlers ---
+async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' | 'campaign' }) {
+    const model = 'gemini-2.5-pro';
+    let systemInstruction = '';
+    
+    switch (type) {
+        case 'photo':
+            systemInstruction = `You are an award-winning conceptual photographer and art director. Your task is to perform a rapid analysis of visual trends on platforms like Behance and Pinterest to identify an under-explored, commercially viable theme. Then, create a single, highly detailed prompt that tells a "micro-story." The prompt must feel like a scene from an art-house film, specifying not just the subject, but the mood, the quality of light, the color palette, and a sense of narrative. Avoid stock photo clichés at all costs. The output must be ONLY the prompt string itself, without any introductory text or labels.`;
+            break;
+        case 'video':
+            systemInstruction = `You are a director pitching a multi-million dollar Super Bowl commercial. You have 5 seconds to captivate the audience. Your task is to generate a single, incredibly dense and evocative prompt for a video. The prompt must describe a complete sensory experience: advanced cinematography (e.g., 'anamorphic lens flare', 'split-diopter focus'), a clear emotional arc (e.g., 'from tension to relief'), and implied sound design (e.g., 'the silence is broken by a single, resonant chord'). The concept must be groundbreaking and unforgettable. The output must be ONLY the prompt string itself, without any introductory text or labels.`;
+            break;
+        case 'campaign':
+            systemInstruction = `You are a Chief Strategy Officer at a market-disrupting advertising agency. Your task is to identify a recent, specific cultural insight or data point about consumer behavior. Based on this insight, you must formulate a single, powerful, and provocative "Big Idea" for a brand campaign. This idea should be summarized in a single, memorable sentence that serves as the campaign topic. It must be innovative and have high potential for going viral. The output must be ONLY the campaign topic string, without any introductory text or labels.`;
+            break;
+    }
+
+    const response = await ai.models.generateContent({
+        model,
+        contents: `Generate one perfected, market-aware ${type} concept.`,
+        config: { systemInstruction }
+    });
+
+    return { prompt: response.text.trim() };
+}
+
+async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }: any) {
+    const model = 'gemini-2.5-pro'; // Use a powerful model for strategy
+    const prompt = `
+        As a visionary Chief Creative Officer, your task is to translate a high-level campaign topic into a concrete, multi-format content strategy. The campaign topic is: "${topic}".
+        
+        Your response must be a perfectly formed JSON object with two keys: "photoPrompts" and "videoPrompts".
+        - "photoPrompts" must be an array of exactly ${photoCount} strings. Each prompt must be a detailed, visually rich directive for an AI image generator.
+        - "videoPrompts" must be an array of exactly ${videoCount} strings. Each prompt must be a descriptive directive for an AI video generator to create a short, cinematic clip.
+
+        CRITICAL: The photo and video prompts must not be disconnected ideas. They must work together to tell a cohesive story that reinforces the main campaign topic. Ensure there is a clear narrative and thematic link across all generated assets.
+    `;
+    const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json" }
+    });
+    return JSON.parse(response.text);
+}
+
+async function handleGenerateStockImage({ prompt, aspectRatio, generateMetadata }: any) {
+    const imageResponse = await ai.models.generateImages({
+        model: 'imagen-4.0-generate-001',
+        prompt: prompt,
         config: {
-            responseMimeType: 'application/json',
+            numberOfImages: 1,
+            aspectRatio: aspectRatio,
+            outputMimeType: "image/png"
+        },
+    });
+    
+    const image = imageResponse.generatedImages[0];
+    if (!image?.image.imageBytes) throw new Error("Image generation failed, no bytes returned.");
+
+    const src = `data:image/png;base64,${image.image.imageBytes}`;
+
+    if (!generateMetadata) {
+        return { src };
+    }
+
+    const metadata = await handleGenerateMetadataForAsset({ prompt, type: 'photo' });
+    return { src, metadata };
+}
+
+async function handleGenerateMetadataForAsset({ prompt, type }: any) {
+    const model = 'gemini-2.5-flash';
+    const systemInstruction = `You are an expert in SEO and digital asset management for premium marketplaces like Getty Images. Generate metadata for a digital asset. The response must be a valid JSON object with three keys: "title" (a compelling, descriptive title, max 60 chars), "description" (a concise, professional summary, max 160 chars), and "tags" (an array of 5-10 highly relevant, commercial-intent lowercase keywords).`;
+    const userPrompt = `Generate metadata for a ${type} with the following theme or prompt: "${prompt}"`;
+    
+    const response = await ai.models.generateContent({
+        model,
+        contents: userPrompt,
+        config: {
+            systemInstruction,
+            responseMimeType: "application/json",
             responseSchema: {
                 type: Type.OBJECT,
                 properties: {
                     title: { type: Type.STRING },
                     description: { type: Type.STRING },
-                    tags: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING },
-                    },
+                    tags: { type: Type.ARRAY, items: { type: Type.STRING } }
                 },
-                required: ['title', 'description', 'tags'],
-            },
-        },
-    });
-    
-    const responseText = response.text ?? '';
-    if (!responseText) {
-        throw new Error('Failed to generate metadata: empty response from AI.');
-    }
-    return JSON.parse(responseText);
-}
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
-    }
-
-    try {
-        const geminiAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-        const { task, ...payload } = req.body;
-
-        switch (task) {
-            // FIX: Refactored to use the @google/genai SDK for stability and simplicity.
-            // The previous raw fetch to Vertex AI was causing server crashes.
-            case 'virtualTryOn': {
-                const { personImage, productImage } = payload;
-                if (!personImage || !productImage) {
-                    return res.status(400).json({ error: 'Missing person or product image' });
-                }
-                
-                const personImagePart = {
-                    inlineData: {
-                        mimeType: personImage.match(/data:(.*);base64,/)?.[1] || 'image/png',
-                        data: personImage.split(',')[1],
-                    },
-                };
-
-                const productImagePart = {
-                    inlineData: {
-                        mimeType: productImage.match(/data:(.*);base64,/)?.[1] || 'image/png',
-                        data: productImage.split(',')[1],
-                    },
-                };
-        
-                const textPart = {
-                    text: 'Put the clothing item from the second image onto the person in the first image. Make it look realistic, retaining the person\'s features and pose. Ensure the clothing fits naturally.',
-                };
-        
-                const response = await geminiAi.models.generateContent({
-                    model: VIRTUAL_TRY_ON_MODEL,
-                    contents: { parts: [personImagePart, productImagePart, textPart] },
-                    config: {
-                        responseModalities: [Modality.IMAGE],
-                    },
-                });
-        
-                const part = response.candidates?.[0]?.content?.parts?.[0];
-                if (part && 'inlineData' in part && part.inlineData?.data) {
-                    const resultImageBase64 = part.inlineData.data;
-                    const mimeType = part.inlineData.mimeType ?? 'image/png';
-                    const resultImage = `data:${mimeType};base64,${resultImageBase64}`;
-                    return res.status(200).json({ resultImage });
-                }
-                
-                throw new Error('No image data found in Gemini API response');
+                required: ["title", "description", "tags"]
             }
-
-
-            case 'generateCreativeStrategy': {
-                const { topic, photoCount, videoCount } = payload;
-                const prompt = `You are a creative director for a marketing campaign. The campaign topic is: "${topic}". Generate a list of ${photoCount} creative and detailed photo prompts and ${videoCount} creative and detailed video prompts for this campaign. The prompts should be suitable for a generative AI model. Return the result as a JSON object with two keys: "photoPrompts" and "videoPrompts", which are arrays of strings.`;
-
-                const response = await geminiAi.models.generateContent({
-                    model: TEXT_MODEL,
-                    contents: prompt,
-                    config: {
-                        responseMimeType: 'application/json',
-                        responseSchema: {
-                            type: Type.OBJECT,
-                            properties: {
-                                photoPrompts: { type: Type.ARRAY, items: { type: Type.STRING } },
-                                videoPrompts: { type: Type.ARRAY, items: { type: Type.STRING } },
-                            },
-                            required: ['photoPrompts', 'videoPrompts'],
-                        },
-                    },
-                });
-
-                const responseText = response.text ?? '';
-                if (!responseText) {
-                    throw new Error('Failed to generate creative strategy: empty response from AI.');
-                }
-                return res.status(200).json(JSON.parse(responseText));
-            }
-
-            case 'generateMetadataForAsset': {
-                const metadata = await handleGenerateMetadataForAsset(geminiAi, payload);
-                return res.status(200).json(metadata);
-            }
-
-            case 'generateStockImage': {
-                const { prompt, aspectRatio, generateMetadata } = payload;
-
-                const imageResponse = await geminiAi.models.generateImages({
-                    model: STOCK_PHOTO_MODEL,
-                    prompt: prompt,
-                    config: {
-                        numberOfImages: 1,
-                        aspectRatio: aspectRatio,
-                        outputMimeType: 'image/png',
-                    },
-                });
-                
-                const base64ImageBytes = imageResponse?.generatedImages?.[0]?.image?.imageBytes;
-                if (!base64ImageBytes) {
-                    throw new Error('Image generation failed, no image bytes returned.');
-                }
-                const src = `data:image/png;base64,${base64ImageBytes}`;
-
-                let metadata;
-                if (generateMetadata) {
-                    metadata = await handleGenerateMetadataForAsset(geminiAi, { prompt, type: 'photo' });
-                }
-
-                return res.status(200).json({ src, metadata });
-            }
-
-            case 'generatePhotoShootPackage': {
-                const { aspectRatio } = payload;
-                const themePrompt = `You are a creative director for a photo shoot. Generate a cohesive theme for a set of 10 stock photos. The theme should be specific and evocative. Then, generate 10 distinct, detailed, and creative image prompts based on that theme. The prompts should be suitable for a generative AI model like Imagen. Return the result as a JSON object with two keys: "theme" (a string) and "prompts" (an array of 10 strings).`;
-
-                const themeResponse = await geminiAi.models.generateContent({
-                    model: ADVANCED_TEXT_MODEL,
-                    contents: themePrompt,
-                    config: {
-                        responseMimeType: 'application/json',
-                        responseSchema: {
-                            type: Type.OBJECT,
-                            properties: {
-                                theme: { type: Type.STRING },
-                                prompts: { type: Type.ARRAY, items: { type: Type.STRING } },
-                            },
-                            required: ['theme', 'prompts'],
-                        },
-                    },
-                });
-                
-                const themeResponseText = themeResponse.text ?? '';
-                if (!themeResponseText) {
-                    throw new Error('Failed to generate photoshoot theme: empty response from AI.');
-                }
-                const { theme, prompts } = JSON.parse(themeResponseText);
-
-                const imagePromises = (prompts as string[]).map(prompt =>
-                    geminiAi.models.generateImages({
-                        model: STOCK_PHOTO_MODEL,
-                        prompt,
-                        config: {
-                            numberOfImages: 1,
-                            aspectRatio,
-                            outputMimeType: 'image/png',
-                        },
-                    }).catch((e) => {
-                        console.error(`Image generation failed for prompt: "${prompt}"`, e);
-                        return { error: true, prompt };
-                    })
-                );
-
-                const imageGenResults = await Promise.all(imagePromises);
-
-                const results = imageGenResults.map((result: any, i) => {
-                    if (result.error) {
-                        return { id: `img-${i}`, prompt: result.prompt, src: null };
-                    }
-                    const base64ImageBytes = result?.generatedImages?.[0]?.image?.imageBytes;
-                    return {
-                        id: `img-${i}`,
-                        prompt: prompts[i],
-                        src: base64ImageBytes ? `data:image/png;base64,${base64ImageBytes}` : null,
-                    };
-                });
-
-                return res.status(200).json({ theme, results });
-            }
-
-            case 'generateVideo': {
-                const { prompt, aspectRatio } = payload;
-                const authToken = await getAuthToken();
-                const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON || '{}');
-                const projectId = credentials.project_id;
-                if (!projectId) {
-                    throw new Error('Project ID not found in credentials.');
-                }
-                const endpoint = `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectId}/locations/us-central1/publishers/google/models/${VIDEO_GENERATION_MODEL}:generateVideos`;
-
-                const requestBody = {
-                    videoGenerationConfig: {
-                        prompt: prompt,
-                        numberOfVideos: 1,
-                        resolution: '1080p',
-                        aspectRatio: aspectRatio
-                    }
-                };
-
-                const apiResponse = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(requestBody)
-                });
-
-                if (!apiResponse.ok) {
-                    const errorBody = await apiResponse.text();
-                    throw new Error(`Vertex AI video request failed with status ${apiResponse.status}: ${errorBody}`);
-                }
-                
-                const operation = await apiResponse.json();
-                return res.status(200).json(operation);
-            }
-
-            case 'checkVideoOperationStatus': {
-                const { operationName } = payload;
-                const authToken = await getAuthToken();
-                const endpoint = `https://us-central1-aiplatform.googleapis.com/v1/${operationName}`;
-                
-                const apiResponse = await fetch(endpoint, {
-                    headers: { 'Authorization': `Bearer ${authToken}` }
-                });
-
-                if (!apiResponse.ok) {
-                    const errorBody = await apiResponse.text();
-                    throw new Error(`Vertex AI operation check failed with status ${apiResponse.status}: ${errorBody}`);
-                }
-                
-                const operation = await apiResponse.json();
-                return res.status(200).json(operation);
-            }
-
-            case 'fetchVideo': {
-                const { uri } = payload;
-                const authToken = await getAuthToken();
-
-                const apiResponse = await fetch(uri, {
-                    headers: { 'Authorization': `Bearer ${authToken}` }
-                });
-
-                if (!apiResponse.ok) {
-                    const errorText = await apiResponse.text();
-                    throw new Error(`Failed to fetch video from URI: ${apiResponse.status} ${apiResponse.statusText}. Response: ${errorText}`);
-                }
-                const videoBuffer = await apiResponse.arrayBuffer();
-                const videoBytes = Buffer.from(videoBuffer).toString('base64');
-                return res.status(200).json({ videoBytes });
-            }
-
-
-            case 'generateCreativePrompt': {
-                const { type } = payload;
-                let subject = '';
-                switch (type) {
-                    case 'photo': subject = 'a visually stunning, high-quality, professional stock photo'; break;
-                    case 'video': subject = 'a short, cinematic video clip (5-7 seconds)'; break;
-                    case 'campaign': subject = 'a marketing campaign concept for a fictional brand. The concept should be just a few words, like "Urban Oasis" or "Retro Future".'; break;
-                    default: return res.status(400).json({ error: 'Invalid prompt type' });
-                }
-
-                const prompt = `You are a creative director. Generate a creative and concise prompt for ${subject}. The prompt should be specific and evocative, suitable for a generative AI. For a campaign, just return the concept topic. For photo/video, return a detailed art direction prompt. Return only the prompt string, with no extra text or quotation marks.`;
-
-                const response = await geminiAi.models.generateContent({
-                    model: TEXT_MODEL,
-                    contents: prompt,
-                });
-                
-                const responseText = response.text ?? '';
-                if (!responseText) {
-                    throw new Error('Failed to generate creative prompt: empty response from AI.');
-                }
-                return res.status(200).json({ prompt: responseText.trim() });
-            }
-            
-            default:
-                return res.status(400).json({ error: 'Invalid task specified' });
         }
-    } catch (error) {
-        console.error('API Error:', error);
-        const message = error instanceof Error ? error.message : 'An unknown server error occurred.';
-        res.status(500).json({ error: message });
-    }
+    });
+
+    return JSON.parse(response.text);
 }
+
+
+async function handleGenerateVideo({ prompt, aspectRatio }: any) {
+    const authToken = await getGoogleAuthToken();
+    const endpoint = `${VERTEX_AI_API_BASE}/publishers/google/models/${VEO_MODEL_ID}:generateVideos`;
+
+    const body = JSON.stringify({
+        prompt,
+        config: {
+            numberOfVideos: 1,
+            resolution: '1080p',
+            aspectRatio: aspectRatio
+        }
+    });
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      body,
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
+        throw new Error(`Vertex AI request failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
+    }
+
+    return response.json();
+}
+
+async function handleCheckVideoOperationStatus({ operationName }: any) {
+    const authToken = await getGoogleAuthToken();
+    // The operation name is the full resource path, so we don't need to construct it.
+    const endpoint = `https://${VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1/${operationName}`;
+
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
+        throw new Error(`Vertex AI status check failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
+    }
+    
+    return response.json();
+}
+
+
+async function handleFetchVideo({ uri }: any) {
+    // NOTE: The download URI from Veo is a publicly accessible signed URL that
+    // requires the API_KEY as a query parameter, separate from the Vertex AI API auth.
+    // This is the intended mechanism.
+    if (!process.env.API_KEY) throw new Error("API key is required to fetch video.");
+    const response = await fetch(`${uri}&key=${process.env.API_KEY}`);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch video from URI. Status: ${response.statusText}`);
+    }
+    const buffer = await response.arrayBuffer();
+    const videoBytes = Buffer.from(buffer).toString('base64');
+    return { videoBytes };
+}
+
+export default handler;

@@ -4,31 +4,47 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Creative Suite</title>
+    
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <script type="importmap">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      .bg-grid-pattern {
+        background-image: linear-gradient(rgba(100, 116, 139, 0.1) 1px, transparent 1px), linear-gradient(to right, rgba(100, 116, 139, 0.1) 1px, transparent 1px);
+        background-size: 2rem 2rem;
+      }
+    </style>
+    
+    <!-- Import Map -->
+    <script type="importmap">
 {
   "imports": {
-    "vite": "https://aistudiocdn.com/vite@^7.1.12",
-    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.0",
-    "@vercel/node": "https://aistudiocdn.com/@vercel/node@^5.5.0",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0",
-    "google-auth-library": "https://aistudiocdn.com/google-auth-library@^10.4.2",
     "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@google/genai": "https://esm.sh/@google/genai@^0.12.0",
     "react-easy-crop": "https://aistudiocdn.com/react-easy-crop@^5.5.3",
     "react-easy-crop/": "https://aistudiocdn.com/react-easy-crop@^5.5.3/",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "jszip": "https://aistudiocdn.com/jszip@^3.10.1",
+    "google-auth-library": "https://aistudiocdn.com/google-auth-library@^10.4.2",
+    "@vercel/node": "https://aistudiocdn.com/@vercel/node@^5.5.0",
+    "@vercel/kv": "https://esm.sh/@vercel/kv@^1.0.1",
     "buffer": "https://aistudiocdn.com/buffer@^6.0.3"
   }
 }
 </script>
-</head>
+  </head>
   <body class="h-full">
     <div id="root"></div>
+    <!-- Main App Script -->
     <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>

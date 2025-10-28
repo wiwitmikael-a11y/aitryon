@@ -36,7 +36,6 @@ export const createContentPackageZip = async (assets: Asset[]): Promise<void> =>
         '"filename","type","title","description","tags","prompt"'
     ];
 
-    // The order is preserved here, matching the generated assets order.
     for (const asset of successfulAssets) {
         try {
             const response = await fetch(asset.src!);
@@ -47,9 +46,7 @@ export const createContentPackageZip = async (assets: Asset[]): Promise<void> =>
 
             zip.file(filename, blob);
             
-            // Format tags with # and space separation for easy copy-paste.
-            const tags = asset.metadata?.tags.map(t => `#${t}`).join(' ') || '';
-            
+            const tags = asset.metadata?.tags.join(', ') || '';
             metadataCsvRows.push(
                 [
                     escapeCsvField(filename),
@@ -66,8 +63,7 @@ export const createContentPackageZip = async (assets: Asset[]): Promise<void> =>
         }
     }
     
-    // Save as .xls to be opened by Excel/Sheets directly into neat columns.
-    zip.file("metadata.xls", metadataCsvRows.join('\n'));
+    zip.file("metadata.csv", metadataCsvRows.join('\n'));
 
     zip.generateAsync({ type: "blob" }).then(content => {
         const link = document.createElement('a');
@@ -81,8 +77,7 @@ export const createContentPackageZip = async (assets: Asset[]): Promise<void> =>
 
 export const createPhotoShootPackageZip = async (results: BatchImageResult[]): Promise<void> => {
     const zip = new JSZip();
-    // FIX: BatchImageResult does not have a 'status' property. The results are already filtered for success on the server.
-    const successfulAssets = results.filter(r => r.src);
+    const successfulAssets = results.filter(r => r.status === 'complete' && r.src);
 
     for (let i = 0; i < successfulAssets.length; i++) {
         const asset = successfulAssets[i];
