@@ -1,13 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type } from "@google/genai";
 import { Buffer } from 'buffer';
+import { getGoogleAuthToken } from './lib/google-auth';
+import { VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, VEO_MODEL_ID } from '../src/constants';
 
-// Ensure the API key is available in environment variables
+
+// Ensure the API key is available in environment variables for non-Vertex AI calls (e.g., Gemini Flash for prompts, Imagen)
 if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable is not set.");
 }
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+const VERTEX_AI_API_BASE = `https://${VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_AI_PROJECT_ID}/locations/${VERTEX_AI_LOCATION}`;
+
 
 async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') {
@@ -190,28 +196,61 @@ async function handleGenerateMetadataForAsset({ prompt, type }: any) {
 
 
 async function handleGenerateVideo({ prompt, aspectRatio }: any) {
-    const operation = await ai.models.generateVideos({
-        model: 'veo-3.1-fast-generate-preview',
+    const authToken = await getGoogleAuthToken();
+    const endpoint = `${VERTEX_AI_API_BASE}/publishers/google/models/${VEO_MODEL_ID}:generateVideos`;
+
+    const body = JSON.stringify({
         prompt,
-        // Image is removed for automated flow
         config: {
             numberOfVideos: 1,
-            resolution: '1080p', // Max resolution for professional output
+            resolution: '1080p',
             aspectRatio: aspectRatio
         }
     });
-    return operation;
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      body,
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
+        throw new Error(`Vertex AI request failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
+    }
+
+    return response.json();
 }
 
 async function handleCheckVideoOperationStatus({ operationName }: any) {
-    // FIX: Use the correct 'getVideosOperation' method instead of the non-existent 'get'.
-    // We construct a minimal operation object as required by the SDK.
-    const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
-    return operation;
+    const authToken = await getGoogleAuthToken();
+    // The operation name is the full resource path, so we don't need to construct it.
+    const endpoint = `https://${VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1/${operationName}`;
+
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
+        throw new Error(`Vertex AI status check failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
+    }
+    
+    return response.json();
 }
 
 
 async function handleFetchVideo({ uri }: any) {
+    // NOTE: The download URI from Veo is a publicly accessible signed URL that
+    // requires the API_KEY as a query parameter, separate from the Vertex AI API auth.
+    // This is the intended mechanism.
     if (!process.env.API_KEY) throw new Error("API key is required to fetch video.");
     const response = await fetch(`${uri}&key=${process.env.API_KEY}`);
     if (!response.ok) {

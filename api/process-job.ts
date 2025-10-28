@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db } from './lib/db';
 import { getGoogleAuthToken } from './lib/google-auth';
-import { API_ENDPOINT } from '../src/constants';
+import { VERTEX_AI_API_BASE, VIRTUAL_TRY_ON_MODEL_ID } from '../src/constants';
 import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse, Job } from '../src/types';
 
 // Helper to remove the data URL prefix if it exists
@@ -12,6 +12,8 @@ const getBase64Data = (dataUrl: string): string => {
   }
   return dataUrl; // Assume it's already just base64 data
 };
+
+const API_ENDPOINT = `${VERTEX_AI_API_BASE}/publishers/google/models/${VIRTUAL_TRY_ON_MODEL_ID}:predict`;
 
 export default async function handler(
   req: VercelRequest,

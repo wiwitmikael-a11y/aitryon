@@ -13,25 +13,8 @@ const VideoGenerator: React.FC = () => {
     const [loadingMessage, setLoadingMessage] = useState('Starting video generation...');
     const [error, setError] = useState<string | null>(null);
     const [operationName, setOperationName] = useState<string | null>(null);
-    const [isKeySelected, setIsKeySelected] = useState(false);
     const [aiPrompt, setAiPrompt] = useState('');
     const pollingRef = useRef<number | null>(null);
-
-    useEffect(() => {
-        const checkKey = async () => {
-            if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
-                setIsKeySelected(true);
-            }
-        };
-        checkKey();
-    }, []);
-
-    const handleSelectKey = async () => {
-        if (window.aistudio) {
-            await window.aistudio.openSelectKey();
-            setIsKeySelected(true);
-        }
-    };
 
     const loadingMessages = [
         "AI is writing a cinematic script...",
@@ -81,12 +64,7 @@ const VideoGenerator: React.FC = () => {
             setOperationName(null);
             setIsLoading(false);
             const errorMessage = err instanceof Error ? err.message : 'Failed to poll for video status.';
-            if (errorMessage.includes("Requested entity was not found")) {
-                setError("API Key error. Please re-select your key and try again.");
-                setIsKeySelected(false);
-            } else {
-                setError(errorMessage);
-            }
+            setError(errorMessage);
         }
     };
     
@@ -122,27 +100,10 @@ const VideoGenerator: React.FC = () => {
         } catch (err) {
             setIsLoading(false);
             const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-            if (errorMessage.includes("API key not valid")) {
-                setError("API Key error. Please re-select your key and try again.");
-                setIsKeySelected(false);
-            } else {
-                setError(errorMessage);
-            }
+            setError(errorMessage);
         }
     };
         
-    if (!isKeySelected) {
-        return (
-            <div className="bg-slate-900/50 p-8 rounded-2xl shadow-lg border border-slate-800 text-center max-w-2xl mx-auto">
-                <h2 className="text-2xl font-bold text-cyan-400 mb-4">API Key Required</h2>
-                <p className="text-slate-300 mb-6">The Cinematic Video Director uses advanced models that require you to select your own API key for billing purposes. Please select a key to continue.</p>
-                <p className="text-xs text-slate-500 mb-6">For more information, please see the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">billing documentation</a>.</p>
-                <button onClick={handleSelectKey} className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-6 rounded-full text-lg transition-colors">Select API Key</button>
-                 {error && <p className="text-red-400 mt-4">{error}</p>}
-            </div>
-        )
-    }
-
     return (
         <div className="space-y-8">
              <div className="text-center max-w-3xl mx-auto">
