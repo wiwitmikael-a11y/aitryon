@@ -1,4 +1,5 @@
 import { GoogleAuth } from 'google-auth-library';
+// FIX: Add import for Buffer to resolve TypeScript type error.
 import { Buffer } from 'buffer';
 
 let authToken: string | null = null;

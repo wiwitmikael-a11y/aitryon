@@ -1,8 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type } from "@google/genai";
-import { Buffer } from 'buffer';
 import { getGoogleAuthToken } from './lib/google-auth';
 import { VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, VEO_MODEL_ID } from '../src/constants';
+// FIX: Add import for Buffer to resolve TypeScript type error.
+import { Buffer } from 'buffer';
 
 
 // --- AUTHENTICATION SETUP ---
