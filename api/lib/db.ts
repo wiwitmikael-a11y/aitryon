@@ -1,9 +1,8 @@
-import createKV from "@vercel/kv";
+import { kv } from "@vercel/kv";
 import type { Job } from '../../src/types';
 
-// createKV will automatically use the Vercel KV environment variables
-// that you have already set (KV_URL, KV_REST_API_TOKEN, etc.)
-const kv = createKV();
+// The imported 'kv' object is already an initialized client.
+// It automatically uses the Vercel KV environment variables.
 
 const db = {
   async get(id: string): Promise<Job | null> {
