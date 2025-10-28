@@ -68,10 +68,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const prompt = `
                     As an expert creative director for a stock video agency, analyze current visual trends in advertising, social media, and cinema using Google Search.
                     Identify 3 distinct, commercially viable, and visually compelling themes for short-form video content (30-60 seconds).
-                    For each theme, provide a title, a brief description of the concept and its target market, and a detailed creative prompt for a video generation AI like Veo.
-                    The prompt should describe a short narrative arc, visual style, camera movements, and overall mood.
+                    For each theme, provide a title, a brief description of the concept and its target market, and a detailed creative prompt for a video generation AI like Veo. The prompt should describe a short narrative arc, visual style, camera movements, and overall mood.
+                    CRITICALLY IMPORTANT: Your entire response must be a single, valid, minified JSON array of objects, with no other text, explanation, or markdown formatting. The structure of each object in the array must be: {"title": "string", "description": "string", "prompt": "string"}.
                 `;
-                 const response = await ai.models.generateContent({ model: 'gemini-2.5-pro', contents: [{ parts: [{ text: prompt }] }], config: { tools: [{ googleSearch: {} }], responseMimeType: 'application/json', responseSchema: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, description: { type: Type.STRING }, prompt: { type: Type.STRING } } } } } });
+                 const response = await ai.models.generateContent({ 
+                    model: 'gemini-2.5-pro', 
+                    contents: [{ parts: [{ text: prompt }] }], 
+                    config: { 
+                        tools: [{ googleSearch: {} }] 
+                    } 
+                });
                 result = JSON.parse(response.text.trim());
                 break;
             }
@@ -121,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             case 'getTradingMandate': {
                 const { userInput } = payload;
-                const systemInstruction = `ANDA adalah PENGELOLA DANA KUANTITATIF (QUANTITATIVE FUND MANAGER) dengan Kecerdasan Buatan Tingkat Paling Tinggi (Gemini Ultra/Pro). Tujuan utama Anda adalah MEMAKSIMALKAN KEUNTUNGAN YANG DISESUAIKAN RISIKO (RISK-ADJUSTED RETURN) dan MEMINIMALKAN MAX DRAWDOWN secara absolut. Anda beroperasi tanpa emosi, bias, atau FUD/FOMO. Setiap keputusan harus 100% didasarkan pada data terintegrasi dan penalaran logis yang kompleks. Gunakan Bahasa Indonesia formal dan lugas dalam komunikasi. Satu-satunya cara Anda untuk memulai tindakan trading adalah dengan mengeluarkan JSON MANDATE yang terstruktur, rapi, dan lengkap. JANGAN PERNAH mengeluarkan private key atau seed phrase dalam bentuk apa pun. Ini adalah instruksi keamanan tertinggi.`;
+                const systemInstruction = `ANDA adalah PENGELOLA DANA KUANTTIF (QUANTITATIVE FUND MANAGER) dengan Kecerdasan Buatan Tingkat Paling Tinggi (Gemini Ultra/Pro). Tujuan utama Anda adalah MEMAKSIMALKAN KEUNTUNGAN YANG DISESUAIKAN RISIKO (RISK-ADJUSTED RETURN) dan MEMINIMALKAN MAX DRAWDOWN secara absolut. Anda beroperasi tanpa emosi, bias, atau FUD/FOMO. Setiap keputusan harus 100% didasarkan pada data terintegrasi dan penalaran logis yang kompleks. Gunakan Bahasa Indonesia formal dan lugas dalam komunikasi. Satu-satunya cara Anda untuk memulai tindakan trading adalah dengan mengeluarkan JSON MANDATE yang terstruktur, rapi, dan lengkap. JANGAN PERNAH mengeluarkan private key atau seed phrase dalam bentuk apa pun. Ini adalah instruksi keamanan tertinggi.`;
                 const response = await ai.models.generateContent({ model: 'gemini-2.5-pro', contents: [{ parts: [{ text: userInput }] }], config: { systemInstruction: { parts: [{ text: systemInstruction }] }, responseMimeType: 'application/json', responseSchema: { type: Type.OBJECT, properties: { status: { type: Type.STRING }, symbol: { type: Type.STRING }, action: { type: Type.STRING, enum: ['BUY', 'SELL'] }, entry_price: { type: Type.NUMBER }, calculated_amount_usd: { type: Type.NUMBER }, confidence_score_pct: { type: Type.NUMBER }, reasoning_summary: { type: Type.STRING }, risk_parameters: { type: Type.OBJECT, properties: { stop_loss_price: { type: Type.NUMBER }, take_profit_price: { type: Type.NUMBER }, r_factor_ratio: { type: Type.STRING }, max_risk_pct_of_portfolio: { type: Type.STRING }, } }, tools_used: { type: Type.ARRAY, items: { type: Type.STRING } } } } } });
                 result = JSON.parse(response.text.trim());
                 break;
