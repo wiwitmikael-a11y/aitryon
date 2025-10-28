@@ -1,13 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { 
     generateStockImage, 
     generateCreativePrompt, 
-    startBatchImageJob, 
-    checkBatchImageJobStatus,
-    generatePhotoShootPrompts
+    generatePhotoShootPackage
 } from '../services/geminiService';
 import type { StockImageResult } from '../services/geminiService';
-import type { BatchJob, BatchImageResult } from '../types';
+import type { BatchImageResult } from '../types';
 import { SpinnerIcon } from './icons/SpinnerIcon';
 import { GenerateIcon } from './icons/GenerateIcon';
 import { CheckIcon } from './icons/CheckIcon';
@@ -15,8 +13,6 @@ import { CrossIcon } from './icons/CrossIcon';
 import { createPhotoShootPackageZip } from '../utils/zipUtils';
 
 type Mode = 'single' | 'batch';
-
-const BATCH_POLLING_INTERVAL = 3000; // 3 seconds
 
 const StockPhotoGenerator: React.FC = () => {
     const [mode, setMode] = useState<Mode>('single');
@@ -134,65 +130,30 @@ const SingleGenerator: React.FC = () => {
 
 const BatchGenerator: React.FC = () => {
     const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('16:9');
-    const [job, setJob] = useState<BatchJob | null>(null);
+    const [results, setResults] = useState<BatchImageResult[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [aiTheme, setAiTheme] = useState('');
-    const pollingRef = useRef<number | null>(null);
-
-    const pollJobStatus = async (id: string) => {
-        try {
-          const currentJob = await checkBatchImageJobStatus(id);
-          setJob(currentJob);
-    
-          if (currentJob.status === 'COMPLETED' || currentJob.status === 'FAILED') {
-            setIsLoading(false);
-            if (pollingRef.current) clearInterval(pollingRef.current);
-            if(currentJob.status === 'FAILED') {
-                setError(currentJob.error || 'The batch job failed for an unknown reason.');
-            }
-          }
-        } catch (err) {
-            setIsLoading(false);
-            if (pollingRef.current) clearInterval(pollingRef.current);
-            setError(err instanceof Error ? err.message : 'An unknown error occurred while polling.');
-        }
-    };
-
-    useEffect(() => {
-        return () => {
-            if (pollingRef.current) clearInterval(pollingRef.current);
-        };
-    }, []);
 
     const handleGenerate = async () => {
         setIsLoading(true);
         setError(null);
-        setJob(null);
+        setResults([]);
         setAiTheme('');
-        if (pollingRef.current) clearInterval(pollingRef.current);
 
         try {
-            setLoadingMessage("AI is developing a core photoshoot theme...");
-            const { theme, prompts } = await generatePhotoShootPrompts();
+            setLoadingMessage("AI is developing a core photoshoot theme and generating all 10 images. This may take a minute...");
+            const { theme, results: batchResults } = await generatePhotoShootPackage(aspectRatio);
             setAiTheme(theme);
-            
-            setLoadingMessage("Submitting job to the production queue...");
-            const { jobId } = await startBatchImageJob(prompts, aspectRatio);
-            
-            setLoadingMessage("Generation in progress...");
-            pollJobStatus(jobId); // Initial poll
-            pollingRef.current = window.setInterval(() => pollJobStatus(jobId), BATCH_POLLING_INTERVAL);
+            setResults(batchResults);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unknown error occurred.');
+        } finally {
             setIsLoading(false);
         }
     };
     
-    const completedCount = job?.results.filter(r => r.status === 'complete').length || 0;
-    const totalCount = job?.prompts.length || 0;
-
     return (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
             <div className="lg:col-span-2 bg-slate-900/50 p-6 rounded-2xl shadow-lg border border-slate-800 flex flex-col justify-center gap-6">
@@ -215,12 +176,10 @@ const BatchGenerator: React.FC = () => {
                         <div className="text-center flex flex-col items-center justify-center h-full">
                             <SpinnerIcon />
                             <p className="text-slate-300 mt-4">{loadingMessage}</p>
-                            {totalCount > 0 && <p className="text-cyan-400 font-bold text-lg">{completedCount} / {totalCount} Generated</p>}
-                            {aiTheme && <p className="text-sm text-slate-500 mt-2 italic">Theme: "{aiTheme}"</p>}
                         </div>
                     )}
                     {error && <p className="text-red-400 text-center">{error}</p>}
-                    {job && (
+                    {results.length > 0 && (
                         <div className='space-y-4'>
                             {aiTheme && (
                                 <div className="p-3 bg-slate-800/70 rounded-lg border border-slate-700">
@@ -229,23 +188,18 @@ const BatchGenerator: React.FC = () => {
                                 </div>
                             )}
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                {job.results.map(res => (
+                                {results.map(res => (
                                     <div key={res.id} className="aspect-square bg-slate-800 rounded-lg flex items-center justify-center relative overflow-hidden">
-                                        {res.status === 'generating' && <SpinnerIcon />}
-                                        {res.status === 'failed' && <div className='text-red-400 text-center p-1'><CrossIcon /><p className='text-xs mt-1' title={res.error}>Failed</p></div>}
-                                        {res.src && <img src={res.src} alt={res.prompt} className="w-full h-full object-cover" />}
-                                        {res.status === 'complete' && <div className='absolute top-1 right-1 bg-green-500/80 text-white rounded-full p-1'><CheckIcon /></div>}
+                                        {res.src ? <img src={res.src} alt={res.prompt} className="w-full h-full object-cover" /> : <div className='text-red-400'><CrossIcon /></div>}
                                     </div>
                                 ))}
                             </div>
-                            {job.status === 'COMPLETED' && (
-                                 <button onClick={() => createPhotoShootPackageZip(job.results.filter(r => r.status === 'complete'))} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-full transition-colors mt-4">
-                                    Download All as .zip
-                                </button>
-                            )}
+                            <button onClick={() => createPhotoShootPackageZip(results)} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-full transition-colors mt-4">
+                                Download All as .zip
+                            </button>
                         </div>
                     )}
-                    {!isLoading && !job && !error && <p className="text-slate-500 text-center py-16">Your generated photo shoot will appear here.</p>}
+                    {!isLoading && results.length === 0 && !error && <p className="text-slate-500 text-center py-16">Your generated photo shoot will appear here.</p>}
                 </div>
             </div>
         </div>

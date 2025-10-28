@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import ImageUploader from './ImageUploader';
 import ResultDisplay from './ResultDisplay';
-import { submitGenerationJob, checkJobStatus } from '../services/vertexAIService';
-import type { HistoryItem, Job } from '../types';
+import { performVirtualTryOn } from '../services/geminiService';
+import type { HistoryItem } from '../types';
 import HistoryGallery from './HistoryGallery';
 import GuideModal from './GuideModal';
 import CropperModal from './CropperModal';
@@ -12,15 +12,12 @@ import { InfoIcon } from './icons/InfoIcon';
 import { Area } from 'react-easy-crop';
 import { GenerateIcon } from './icons/GenerateIcon';
 
-const POLLING_INTERVAL = 3000; // 3 seconds
-
 function VirtualTryOn() {
   const [personImage, setPersonImage] = useState<string | null>(null);
   const [productImage, setProductImage] = useState<string | null>(null);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
   const [history, setHistory] = useLocalStorage<HistoryItem[]>('vto-history', []);
   
   const [guideShown, setGuideShown] = useLocalStorage('vto-guide-shown', false);
@@ -28,66 +25,6 @@ function VirtualTryOn() {
   
   const [isCropperOpen, setIsCropperOpen] = useState(false);
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
-
-  const pollingRef = useRef<number | null>(null);
-
-  const handleJobSuccess = useCallback((job: Job) => {
-    if (job.resultImage) {
-      setGeneratedImage(job.resultImage);
-      const newHistoryItem: HistoryItem = {
-        id: job.id,
-        resultImage: job.resultImage,
-        personImage: job.personImage,
-        productImage: job.productImage,
-      };
-      // Add new item and prevent duplicates
-      setHistory(prevHistory => [newHistoryItem, ...prevHistory.filter(h => h.id !== job.id)]);
-    } else {
-      setError("Job completed but no image was returned.");
-    }
-  }, [setHistory]);
-  
-  const pollJobStatus = useCallback(async (id: string) => {
-    try {
-      const job = await checkJobStatus(id);
-      switch (job.status) {
-        case 'COMPLETED':
-          setIsLoading(false);
-          setJobId(null);
-          if (pollingRef.current) clearInterval(pollingRef.current);
-          handleJobSuccess(job);
-          break;
-        case 'FAILED':
-          setIsLoading(false);
-          setJobId(null);
-          if (pollingRef.current) clearInterval(pollingRef.current);
-          setError(job.error || 'The generation job failed for an unknown reason.');
-          break;
-        case 'PENDING':
-        case 'PROCESSING':
-          break;
-        default:
-            setIsLoading(false);
-            setJobId(null);
-            if (pollingRef.current) clearInterval(pollingRef.current);
-            setError(`Unknown job status: ${job.status}`);
-      }
-    } catch (err) {
-      setIsLoading(false);
-      setJobId(null);
-      if (pollingRef.current) clearInterval(pollingRef.current);
-      setError(err instanceof Error ? `Failed to check job status: ${err.message}` : 'An unknown error occurred while polling for status.');
-    }
-  }, [handleJobSuccess]);
-
-  useEffect(() => {
-    if (jobId) {
-      pollingRef.current = window.setInterval(() => { pollJobStatus(jobId); }, POLLING_INTERVAL);
-    }
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [jobId, pollJobStatus]);
 
   const handleGenerate = useCallback(async () => {
     if (!personImage || !productImage) {
@@ -97,15 +34,25 @@ function VirtualTryOn() {
     setIsLoading(true);
     setError(null);
     setGeneratedImage(null);
-    if (pollingRef.current) clearInterval(pollingRef.current);
+    
     try {
-      const { jobId } = await submitGenerationJob(personImage, productImage);
-      setJobId(jobId);
+      const { resultImage } = await performVirtualTryOn(personImage, productImage);
+      setGeneratedImage(resultImage);
+
+      const newHistoryItem: HistoryItem = {
+        id: `job-${Date.now()}`,
+        resultImage: resultImage,
+        personImage: personImage,
+        productImage: productImage,
+      };
+      setHistory(prevHistory => [newHistoryItem, ...prevHistory.filter(h => h.personImage !== personImage || h.productImage !== productImage)]);
+      
     } catch (err) {
-      setError(err instanceof Error ? `Submission failed: ${err.message}` : 'An unknown error occurred during job submission.');
-      setIsLoading(false);
+      setError(err instanceof Error ? `Generation failed: ${err.message}` : 'An unknown error occurred during generation.');
+    } finally {
+        setIsLoading(false);
     }
-  }, [personImage, productImage]);
+  }, [personImage, productImage, setHistory]);
   
   const handleReuse = (item: HistoryItem) => {
     setPersonImage(item.personImage);

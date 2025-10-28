@@ -81,7 +81,8 @@ export const createContentPackageZip = async (assets: Asset[]): Promise<void> =>
 
 export const createPhotoShootPackageZip = async (results: BatchImageResult[]): Promise<void> => {
     const zip = new JSZip();
-    const successfulAssets = results.filter(r => r.status === 'complete' && r.src);
+    // FIX: BatchImageResult does not have a 'status' property. The results are already filtered for success on the server.
+    const successfulAssets = results.filter(r => r.src);
 
     for (let i = 0; i < successfulAssets.length; i++) {
         const asset = successfulAssets[i];
