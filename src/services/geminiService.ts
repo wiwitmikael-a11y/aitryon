@@ -60,16 +60,17 @@ export const generateMetadataForAsset = async (prompt: string, type: 'photo' | '
     return callGeminiProxy('generateMetadataForAsset', { prompt, type });
 };
 
-export const getTradingMandate = async (prompt: string): Promise<any> => {
-    return callGeminiProxy('getTradingMandate', { prompt });
-};
-
 // New function for automated idea generation
 export const generateCreativePrompt = async (
     type: 'photo' | 'video' | 'campaign'
 ): Promise<{ prompt: string }> => {
     return callGeminiProxy('generateCreativePrompt', { type });
 };
+
+// New function for Photo Shoot mode
+export const generatePhotoShootPrompts = async (): Promise<{ theme: string, prompts: string[] }> => {
+    return callGeminiProxy('generatePhotoShootPrompts', {});
+}
 
 
 // Batch job services for Stock Photo Generator

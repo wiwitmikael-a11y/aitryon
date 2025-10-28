@@ -59,6 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             
             if (resultIndex === -1) continue;
 
+            // Update status to 'generating' before starting this specific image
             updatedResults[resultIndex].status = 'generating';
             await db.update<BatchJob>(jobId, { results: updatedResults });
 
@@ -71,6 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 updatedResults[resultIndex].error = error instanceof Error ? error.message : 'Unknown generation error.';
                 console.error(`Failed to generate image for prompt: "${prompt}"`, error);
             }
+            // IMPORTANT: Update DB after each image generation to provide real-time progress
             await db.update<BatchJob>(jobId, { results: updatedResults });
         }
         

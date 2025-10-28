@@ -40,6 +40,9 @@ async function handler(req: VercelRequest, res: VercelResponse) {
             case 'generateCreativePrompt':
                 result = await handleGenerateCreativePrompt(payload);
                 break;
+            case 'generatePhotoShootPrompts':
+                result = await handleGeneratePhotoShootPrompts(payload);
+                break;
             default:
                 return res.status(400).json({ error: 'Invalid task' });
         }
@@ -50,6 +53,33 @@ async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(500).json({ error: message });
     }
 }
+
+async function handleGeneratePhotoShootPrompts(payload: any) {
+    const model = 'gemini-2.5-pro';
+    const systemInstruction = `You are a world-class art director planning a commercial photo shoot. Your goal is to generate a cohesive set of 10 images around a single, commercially valuable theme.
+First, define a concise 'theme'. Then, create an array of 10 highly detailed and distinct prompts that explore variations of this theme. These variations should cover different angles, lighting, compositions, subjects, and emotions.
+Your response MUST be a valid JSON object with two keys: "theme" (a string) and "prompts" (an array of exactly 10 strings).`;
+
+    const response = await ai.models.generateContent({
+        model,
+        contents: "Generate a new photo shoot concept.",
+        config: { 
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    theme: { type: Type.STRING },
+                    prompts: { type: Type.ARRAY, items: { type: Type.STRING } }
+                },
+                required: ["theme", "prompts"]
+            }
+        }
+    });
+
+    return JSON.parse(response.text);
+}
+
 
 // --- Task Handlers ---
 async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' | 'campaign' }) {

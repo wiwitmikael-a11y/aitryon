@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { AssetMetadata } from '../services/geminiService';
+import type { BatchImageResult } from '../types';
 
 interface Asset {
     id: string;
@@ -68,6 +69,32 @@ export const createContentPackageZip = async (assets: Asset[]): Promise<void> =>
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
         link.download = `AI-Creative-Package-${Date.now()}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    });
+};
+
+export const createPhotoShootPackageZip = async (results: BatchImageResult[]): Promise<void> => {
+    const zip = new JSZip();
+    const successfulAssets = results.filter(r => r.status === 'complete' && r.src);
+
+    for (let i = 0; i < successfulAssets.length; i++) {
+        const asset = successfulAssets[i];
+        try {
+            const response = await fetch(asset.src!);
+            const blob = await response.blob();
+            const filename = `photo-shoot-image-${i + 1}.png`;
+            zip.file(filename, blob);
+        } catch (e) {
+            console.error(`Failed to fetch and add asset ${asset.id} to zip:`, e);
+        }
+    }
+
+    zip.generateAsync({ type: "blob" }).then(content => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `AI-Photo-Shoot-${Date.now()}.zip`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
