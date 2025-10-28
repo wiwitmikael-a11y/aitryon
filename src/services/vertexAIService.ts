@@ -1,9 +1,7 @@
-import type { Job } from '../types';
-
-export const submitGenerationJob = async (
+export const performVirtualTryOn = async (
   personImage: string,
   productImage: string
-): Promise<{ jobId: string }> => {
+): Promise<{ resultImage: string }> => {
   const response = await fetch('/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -12,19 +10,8 @@ export const submitGenerationJob = async (
 
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.message || 'Failed to submit job for processing.');
+    throw new Error(data.message || 'Failed to generate image.');
   }
   
   return data;
-};
-
-export const checkJobStatus = async (jobId: string): Promise<Job> => {
-  const response = await fetch(`/api/status?jobId=${jobId}`);
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.message || 'Failed to fetch job status.');
-  }
-  
-  return data.job;
 };

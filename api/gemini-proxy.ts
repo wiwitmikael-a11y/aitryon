@@ -46,9 +46,6 @@ async function handler(req: VercelRequest, res: VercelResponse) {
             case 'generateCreativePrompt':
                 result = await handleGenerateCreativePrompt(payload);
                 break;
-            case 'generatePhotoShootPrompts':
-                result = await handleGeneratePhotoShootPrompts(payload);
-                break;
             default:
                 return res.status(400).json({ error: 'Invalid task' });
         }
@@ -59,45 +56,6 @@ async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(500).json({ error: message });
     }
 }
-
-async function handleGeneratePhotoShootPrompts(payload: any) {
-    const model = 'gemini-2.5-pro';
-    const systemInstruction = `You are a visionary Art Director for a major global brand like Apple, Nike, or Patagonia. You are planning a high-concept photo shoot.
-Your task is to create a complete, narrative-driven shot list.
-1.  **Define a Core Concept/Theme:** This should be a powerful, single-sentence idea that is commercially relevant and emotionally resonant.
-2.  **Create a Narrative Shot List:** Generate an array of exactly 10 distinct, highly-detailed prompts. These prompts are not random variations; they must follow a logical narrative sequence as if telling a story. For example: an establishing shot, a medium shot of the subject, a detail/macro shot of a key object, an action shot, an emotional portrait, an abstract shot, etc. Each prompt must be unique and contribute to the overall story of the theme.
-
-Your response MUST be a valid JSON object with two keys: "theme" (a string for the core concept) and "prompts" (an array of exactly 10 detailed string prompts).`;
-
-    const response = await ai.models.generateContent({
-        model,
-        contents: "Generate a new photo shoot concept and narrative shot list.",
-        config: { 
-            systemInstruction,
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    theme: { type: Type.STRING },
-                    prompts: { type: Type.ARRAY, items: { type: Type.STRING } }
-                },
-                required: ["theme", "prompts"]
-            }
-        }
-    });
-
-    try {
-        const text = response.text.trim();
-        if (!text) {
-            throw new Error("Gemini returned an empty response for photo shoot prompts.");
-        }
-        return JSON.parse(text);
-    } catch (e) {
-        console.error("Failed to parse Gemini response as JSON:", response.text);
-        throw new Error("The AI failed to generate a valid photo shoot plan. Please try again.");
-    }
-}
-
 
 // --- Task Handlers ---
 async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' | 'campaign' }) {

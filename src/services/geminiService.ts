@@ -1,5 +1,3 @@
-import type { BatchJob } from '../types';
-
 export interface AssetMetadata {
     title: string;
     description: string;
@@ -65,35 +63,4 @@ export const generateCreativePrompt = async (
     type: 'photo' | 'video' | 'campaign'
 ): Promise<{ prompt: string }> => {
     return callGeminiProxy('generateCreativePrompt', { type });
-};
-
-// New function for Photo Shoot mode
-export const generatePhotoShootPrompts = async (): Promise<{ theme: string, prompts: string[] }> => {
-    return callGeminiProxy('generatePhotoShootPrompts', {});
-}
-
-
-// Batch job services for Stock Photo Generator
-export const startBatchImageJob = async (prompts: string[], aspectRatio: '1:1' | '16:9' | '9:16'): Promise<{ jobId: string }> => {
-    const response = await fetch('/api/start-batch-job', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompts, aspectRatio }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-        throw new Error(data.message || 'Failed to submit batch job.');
-    }
-    return data;
-};
-
-export const checkBatchImageJobStatus = async (jobId: string): Promise<BatchJob> => {
-    const response = await fetch(`/api/get-batch-status?jobId=${jobId}`);
-    const data = await response.json();
-
-    if (!response.ok) {
-        throw new Error(data.message || 'Failed to fetch batch job status.');
-    }
-    return data.job;
 };
