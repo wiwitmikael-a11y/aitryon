@@ -2,7 +2,7 @@
 import { Buffer } from 'buffer';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 // FIX: Add Modality for image generation requests.
-import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold, Modality } from '@google/genai';
+import { GoogleGenAI, Type, Modality } from '@google/genai';
 import { getAuthToken } from './lib/google-auth';
 import {
     VIRTUAL_TRY_ON_MODEL,
