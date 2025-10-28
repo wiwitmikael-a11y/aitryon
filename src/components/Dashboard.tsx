@@ -4,6 +4,7 @@ import { TryOnIcon } from './icons/TryOnIcon';
 import { PhotoIcon } from './icons/PhotoIcon';
 import { VideoGeneratorIcon } from './icons/VideoGeneratorIcon';
 import { DirectorIcon } from './icons/DirectorIcon'; 
+import { ViralVideoIcon } from './icons/ViralVideoIcon';
 
 interface DashboardProps {
   onSelectTool: (tool: Tool) => void;
@@ -33,6 +34,12 @@ const tools: { id: Tool; title: string; description: string; icon: React.FC }[] 
     title: 'AI Creative Director',
     description: 'Develop a content strategy and generate a package of photos and videos from a single idea.',
     icon: DirectorIcon,
+  },
+  {
+    id: 'viral-video',
+    title: 'Viral Affiliate Video',
+    description: 'Buat video afiliasi viral secara otomatis dari gambar dan deskripsi produk.',
+    icon: ViralVideoIcon,
   },
 ];
 

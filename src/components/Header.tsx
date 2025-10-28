@@ -14,6 +14,7 @@ const Header: React.FC<HeaderProps> = ({ activeTool, onNavigateHome }) => {
     'stock-photo': 'AI Art Director',
     'video-generator': 'Cinematic Video Director',
     'creative-director': 'AI Creative Director',
+    'viral-video': 'Viral Affiliate Video',
   }
 
   return (

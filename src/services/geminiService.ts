@@ -1,3 +1,5 @@
+import { Modality } from "@google/genai";
+
 export interface AssetMetadata {
     title: string;
     description: string;
@@ -39,10 +41,10 @@ export const generateStockImage = async (
 
 export const generateVideo = async (
     prompt: string, 
-    aspectRatio: '16:9' | '9:16' = '16:9'
+    aspectRatio: '16:9' | '9:16' = '16:9',
+    image?: { data: string, mimeType: string }
 ): Promise<any> => {
-    // This function is simplified; image payload is removed for the automated workflow
-    return callGeminiProxy('generateVideo', { prompt, aspectRatio });
+    return callGeminiProxy('generateVideo', { prompt, aspectRatio, image });
 };
 
 export const checkVideoOperationStatus = async (operationName: string): Promise<any> => {
@@ -58,9 +60,17 @@ export const generateMetadataForAsset = async (prompt: string, type: 'photo' | '
     return callGeminiProxy('generateMetadataForAsset', { prompt, type });
 };
 
-// New function for automated idea generation
 export const generateCreativePrompt = async (
     type: 'photo' | 'video' | 'campaign'
 ): Promise<{ prompt: string }> => {
     return callGeminiProxy('generateCreativePrompt', { type });
+};
+
+// --- Viral Affiliate Video Functions ---
+export const generateVideoBrief = async (productImage: string, description: string, language: string): Promise<any> => {
+    return callGeminiProxy('generateVideoBrief', { productImage, description, language });
+};
+
+export const generateVideoStoryboard = async (brief: any, language: string, aspectRatio: string): Promise<any> => {
+    return callGeminiProxy('generateVideoStoryboard', { brief, language, aspectRatio });
 };

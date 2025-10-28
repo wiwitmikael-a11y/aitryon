@@ -5,9 +5,10 @@ import VirtualTryOn from './components/VirtualTryOn';
 import StockPhotoGenerator from './components/StockPhotoGenerator';
 import VideoGenerator from './components/VideoGenerator';
 import CreativeDirector from './components/CreativeDirector';
+import ViralVideoGenerator from './components/ViralVideoGenerator';
 import Footer from './components/Footer';
 
-export type Tool = 'dashboard' | 'try-on' | 'stock-photo' | 'video-generator' | 'creative-director';
+export type Tool = 'dashboard' | 'try-on' | 'stock-photo' | 'video-generator' | 'creative-director' | 'viral-video';
 
 function App() {
   const [activeTool, setActiveTool] = useState<Tool>('dashboard');
@@ -22,6 +23,8 @@ function App() {
         return <VideoGenerator />;
       case 'creative-director':
         return <CreativeDirector />;
+      case 'viral-video':
+        return <ViralVideoGenerator />;
       case 'dashboard':
       default:
         return <Dashboard onSelectTool={setActiveTool} />;
