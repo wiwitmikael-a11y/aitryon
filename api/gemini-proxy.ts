@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI, Modality, Type, HarmCategory, HarmBlockThreshold } from '@google/genai';
+import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from '@google/genai';
 import { getAuthToken } from './lib/google-auth';
 import {
     VIRTUAL_TRY_ON_MODEL,
@@ -15,9 +15,11 @@ interface AssetMetadata {
     tags: string[];
 }
 
-const geminiAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+// Moved instantiation inside handler for serverless best practices
+// const geminiAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 async function handleGenerateMetadataForAsset(
+    geminiAi: GoogleGenAI,
     payload: { prompt: string; type: 'photo' | 'video' }
 ): Promise<AssetMetadata> {
     const { prompt, type } = payload;
@@ -62,6 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
+        const geminiAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
         const { task, ...payload } = req.body;
 
         switch (task) {
@@ -100,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     ]
                 };
 
-                const response = await fetch(endpoint, {
+                const apiResponse = await fetch(endpoint, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${authToken}`,
@@ -109,12 +112,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     body: JSON.stringify(requestBody)
                 });
 
-                if (!response.ok) {
-                    const errorBody = await response.text();
-                    throw new Error(`Vertex AI API request failed with status ${response.status}: ${errorBody}`);
+                if (!apiResponse.ok) {
+                    const errorBody = await apiResponse.text();
+                    throw new Error(`Vertex AI API request failed with status ${apiResponse.status}: ${errorBody}`);
                 }
                 
-                const responseText = await response.text();
+                const responseText = await apiResponse.text();
                 const jsonParts = responseText.match(/{[\s\S]*?}/g) || [];
                 const lastPart = jsonParts.length > 0 ? JSON.parse(jsonParts[jsonParts.length - 1]) : {};
                 const firstPart = lastPart?.candidates?.[0]?.content?.parts?.[0];
@@ -157,13 +160,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             case 'generateMetadataForAsset': {
-                const metadata = await handleGenerateMetadataForAsset(payload);
+                const metadata = await handleGenerateMetadataForAsset(geminiAi, payload);
                 return res.status(200).json(metadata);
             }
 
             case 'generateStockImage': {
                 const { prompt, aspectRatio, generateMetadata } = payload;
 
+                // FIX: Moved `safetySettings` from `config` to the top-level of the request.
                 const imageResponse = await geminiAi.models.generateImages({
                     model: STOCK_PHOTO_MODEL,
                     prompt: prompt,
@@ -171,14 +175,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         numberOfImages: 1,
                         aspectRatio: aspectRatio,
                         outputMimeType: 'image/png',
-                        // FIX: `safetySettings` must be inside the `config` object.
-                        safetySettings: [
-                            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                        ],
                     },
+                    safetySettings: [
+                        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                    ],
                 });
                 
                 const base64ImageBytes = imageResponse?.generatedImages?.[0]?.image?.imageBytes;
@@ -189,7 +192,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                 let metadata;
                 if (generateMetadata) {
-                    metadata = await handleGenerateMetadataForAsset({ prompt, type: 'photo' });
+                    metadata = await handleGenerateMetadataForAsset(geminiAi, { prompt, type: 'photo' });
                 }
 
                 return res.status(200).json({ src, metadata });
@@ -229,14 +232,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             numberOfImages: 1,
                             aspectRatio,
                             outputMimeType: 'image/png',
-                            // FIX: `safetySettings` must be inside the `config` object.
-                            safetySettings: [
-                                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                            ],
                         },
+                        // FIX: Moved `safetySettings` from `config` to the top-level of the request.
+                        safetySettings: [
+                            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                        ],
                     }).catch((e) => {
                         console.error(`Image generation failed for prompt: "${prompt}"`, e);
                         return { error: true, prompt };
@@ -279,7 +282,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
                 };
 
-                const response = await fetch(endpoint, {
+                const apiResponse = await fetch(endpoint, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${authToken}`,
@@ -288,12 +291,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     body: JSON.stringify(requestBody)
                 });
 
-                if (!response.ok) {
-                    const errorBody = await response.text();
-                    throw new Error(`Vertex AI video request failed with status ${response.status}: ${errorBody}`);
+                if (!apiResponse.ok) {
+                    const errorBody = await apiResponse.text();
+                    throw new Error(`Vertex AI video request failed with status ${apiResponse.status}: ${errorBody}`);
                 }
                 
-                const operation = await response.json();
+                const operation = await apiResponse.json();
                 return res.status(200).json(operation);
             }
 
@@ -302,16 +305,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const authToken = await getAuthToken();
                 const endpoint = `https://us-central1-aiplatform.googleapis.com/v1/${operationName}`;
                 
-                const response = await fetch(endpoint, {
+                const apiResponse = await fetch(endpoint, {
                     headers: { 'Authorization': `Bearer ${authToken}` }
                 });
 
-                if (!response.ok) {
-                    const errorBody = await response.text();
-                    throw new Error(`Vertex AI operation check failed with status ${response.status}: ${errorBody}`);
+                if (!apiResponse.ok) {
+                    const errorBody = await apiResponse.text();
+                    throw new Error(`Vertex AI operation check failed with status ${apiResponse.status}: ${errorBody}`);
                 }
                 
-                const operation = await response.json();
+                const operation = await apiResponse.json();
                 return res.status(200).json(operation);
             }
 
@@ -319,15 +322,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const { uri } = payload;
                 const authToken = await getAuthToken();
 
-                const response = await fetch(uri, {
+                const apiResponse = await fetch(uri, {
                     headers: { 'Authorization': `Bearer ${authToken}` }
                 });
 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Failed to fetch video from URI: ${response.status} ${response.statusText}. Response: ${errorText}`);
+                if (!apiResponse.ok) {
+                    const errorText = await apiResponse.text();
+                    throw new Error(`Failed to fetch video from URI: ${apiResponse.status} ${apiResponse.statusText}. Response: ${errorText}`);
                 }
-                const videoBuffer = await response.arrayBuffer();
+                const videoBuffer = await apiResponse.arrayBuffer();
                 const videoBytes = Buffer.from(videoBuffer).toString('base64');
                 return res.status(200).json({ videoBytes });
             }
