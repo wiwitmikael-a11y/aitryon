@@ -179,7 +179,7 @@ const BatchGenerator: React.FC = () => {
             setAiTheme(theme);
             
             setLoadingMessage("Submitting job to the production queue...");
-            const { jobId } = await startBatchImageJob(prompts);
+            const { jobId } = await startBatchImageJob(prompts, aspectRatio);
             
             setLoadingMessage("Generation in progress...");
             pollJobStatus(jobId); // Initial poll

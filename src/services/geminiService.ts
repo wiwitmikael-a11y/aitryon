@@ -74,11 +74,11 @@ export const generatePhotoShootPrompts = async (): Promise<{ theme: string, prom
 
 
 // Batch job services for Stock Photo Generator
-export const startBatchImageJob = async (prompts: string[]): Promise<{ jobId: string }> => {
+export const startBatchImageJob = async (prompts: string[], aspectRatio: '1:1' | '16:9' | '9:16'): Promise<{ jobId: string }> => {
     const response = await fetch('/api/start-batch-job', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompts }),
+        body: JSON.stringify({ prompts, aspectRatio }),
     });
 
     const data = await response.json();

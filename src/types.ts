@@ -61,5 +61,6 @@ export interface BatchJob {
     prompts: string[];
     results: BatchImageResult[];
     createdAt: number;
+    aspectRatio: '1:1' | '16:9' | '9:16';
     error?: string;
 }

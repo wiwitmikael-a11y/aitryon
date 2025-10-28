@@ -8,10 +8,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { prompts } = req.body;
+    const { prompts, aspectRatio } = req.body;
 
     if (!prompts || !Array.isArray(prompts) || prompts.length === 0) {
       return res.status(400).json({ message: 'Missing or invalid prompts array.' });
+    }
+    if (!aspectRatio || !['1:1', '16:9', '9:16'].includes(aspectRatio)) {
+      return res.status(400).json({ message: 'Missing or invalid aspectRatio.' });
     }
 
     const jobId = Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -19,6 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       id: jobId,
       status: 'PENDING',
       prompts,
+      aspectRatio,
       results: prompts.map((p, i) => ({ id: `image-${i}`, prompt: p, status: 'pending' })),
       createdAt: Date.now(),
     };

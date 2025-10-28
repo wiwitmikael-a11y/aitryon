@@ -9,13 +9,13 @@ if (!process.env.API_KEY) {
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 
-async function generateImageForPrompt(prompt: string): Promise<{src: string}> {
+async function generateImageForPrompt(prompt: string, aspectRatio: '1:1' | '16:9' | '9:16'): Promise<{src: string}> {
     const imageResponse = await ai.models.generateImages({
         model: 'imagen-4.0-generate-001',
         prompt: prompt,
         config: {
             numberOfImages: 1,
-            aspectRatio: '16:9',
+            aspectRatio: aspectRatio,
             outputMimeType: "image/png"
         },
     });
@@ -64,7 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             await db.update<BatchJob>(jobId, { results: updatedResults });
 
             try {
-                const { src } = await generateImageForPrompt(prompt);
+                const { src } = await generateImageForPrompt(prompt, job.aspectRatio);
                 updatedResults[resultIndex].status = 'complete';
                 updatedResults[resultIndex].src = src;
             } catch (error) {

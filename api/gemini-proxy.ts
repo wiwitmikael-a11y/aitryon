@@ -77,7 +77,16 @@ Your response MUST be a valid JSON object with two keys: "theme" (a string) and 
         }
     });
 
-    return JSON.parse(response.text);
+    try {
+        const text = response.text.trim();
+        if (!text) {
+            throw new Error("Gemini returned an empty response for photo shoot prompts.");
+        }
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Failed to parse Gemini response as JSON:", response.text);
+        throw new Error("The AI failed to generate a valid photo shoot plan. Please try again.");
+    }
 }
 
 
