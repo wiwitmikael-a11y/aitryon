@@ -1,11 +1,17 @@
 // Fix: Add GenerateVideosOperationResponse to imports
-import { GoogleGenAI, Type, GenerateVideosOperationResponse } from '@google/genai';
+import { GoogleGenAI, Type, GenerateVideosOperationResponse, Video } from '@google/genai';
 
 // Fix: Define and export AssetMetadata type for use in other components.
 export interface AssetMetadata {
   title: string;
   description: string;
   tags: string[];
+}
+
+export interface VideoTheme {
+    title: string;
+    description: string;
+    prompt: string;
 }
 
 const METADATA_SCHEMA = {
@@ -60,7 +66,7 @@ const PROMPTS_SCHEMA = {
 // Fix: Implement and export analyzeTrendAndGeneratePrompts.
 export const analyzeTrendAndGeneratePrompts = async (topic: string): Promise<string[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const fullPrompt = `Analyze the following visual trend or topic and generate 3-5 diverse, detailed, and visually rich prompts suitable for a text-to-image AI model like Imagen. The prompts should capture the essence of the trend but offer unique perspectives. The trend is: "${topic}"`;
+  const fullPrompt = `Analyze the following visual trend and generate 3-5 diverse, ultra-realistic prompts for a text-to-image AI. The prompts should be detailed, visually rich, and sound like they were conceptualized by a professional photographer. The trend is: "${topic}"`;
 
   try {
     const response = await ai.models.generateContent({
@@ -84,10 +90,11 @@ export const analyzeTrendAndGeneratePrompts = async (topic: string): Promise<str
 // Fix: Implement and export generateStockImage.
 export const generateStockImage = async (prompt: string): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const enhancedPrompt = `${prompt}, ultra-realistic, photorealistic, professional photography, 4k, sharp focus, detailed, cinematic lighting, shot on a professional camera.`;
   try {
     const response = await ai.models.generateImages({
       model: 'imagen-4.0-generate-001',
-      prompt: prompt,
+      prompt: enhancedPrompt,
       config: {
         numberOfImages: 1,
         outputMimeType: 'image/png',
@@ -128,8 +135,8 @@ const STRATEGY_SCHEMA = {
 export const generateCreativeStrategy = async (topic: string, photoCount: number, videoCount: number): Promise<{ photoPrompts: string[], videoPrompts: string[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const fullPrompt = `As an expert creative director, develop a content strategy for a marketing campaign about "${topic}".
-  Generate exactly ${photoCount} distinct, detailed, and visually rich prompts for stock photos.
-  Generate exactly ${videoCount} distinct, detailed, and cinematic prompts for short (5-10 second) stock video clips (B-roll footage).
+  Generate exactly ${photoCount} distinct, detailed, and visually rich prompts for ultra-realistic stock photos.
+  Generate exactly ${videoCount} distinct, detailed, and cinematic prompts for short (5-10 second) ultra-photorealistic stock video clips.
   The prompts should be diverse and cover different aspects of the topic.`;
 
   try {
@@ -175,6 +182,76 @@ export const generateVideo = async (prompt: string) => {
   }
 };
 
+export const generateAndExtendVideo = async (
+    prompt: string, 
+    referenceImage: string | null,
+    onProgress: (message: string) => void
+): Promise<GenerateVideosOperationResponse> => {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const EXTENSIONS = 4; // Base clip + 4 extensions = 5 clips total (~35 seconds)
+    const TOTAL_STEPS = EXTENSIONS + 1;
+
+    let currentVideo: Video | undefined = undefined;
+    let finalOperation: GenerateVideosOperationResponse | null = null;
+
+    const imagePayload = referenceImage ? {
+        image: {
+            imageBytes: referenceImage.split(',')[1],
+            mimeType: 'image/png'
+        }
+    } : {};
+    
+    // 1. Generate Base Clip
+    onProgress(`Generating Base Clip (1/${TOTAL_STEPS})...`);
+    let operation = await ai.models.generateVideos({
+      model: 'veo-3.1-generate-preview',
+      prompt: `${prompt}, ultra-photorealistic, cinematic, professional video shoot, 4k`,
+      ...imagePayload,
+      config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '16:9' }
+    });
+
+    while (!operation.done) {
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        operation = await ai.operations.getVideosOperation({ operation: operation });
+    }
+    if (operation.error) throw new Error(`Base clip generation failed: ${operation.error.message}`);
+    
+    currentVideo = operation.response?.generatedVideos?.[0]?.video;
+    finalOperation = operation;
+    if (!currentVideo) throw new Error("Failed to get video from base clip generation.");
+
+    // 2. Extend Video in a loop
+    for (let i = 0; i < EXTENSIONS; i++) {
+        onProgress(`Extending Video (${i + 2}/${TOTAL_STEPS})...`);
+        operation = await ai.models.generateVideos({
+            model: 'veo-3.1-generate-preview',
+            prompt: 'continue the scene seamlessly, maintaining visual and narrative consistency.',
+            video: currentVideo,
+            ...imagePayload,
+            config: {
+                numberOfVideos: 1,
+                resolution: '720p',
+                aspectRatio: '16:9',
+            }
+        });
+        
+        while (!operation.done) {
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            operation = await ai.operations.getVideosOperation({ operation: operation });
+        }
+        if (operation.error) throw new Error(`Extension ${i + 1} failed: ${operation.error.message}`);
+        
+        currentVideo = operation.response?.generatedVideos?.[0]?.video;
+        finalOperation = operation;
+        if (!currentVideo) throw new Error(`Failed to get video from extension ${i + 1}.`);
+    }
+
+    onProgress('Finalizing video...');
+    if (!finalOperation) throw new Error("Video generation process completed without a final result.");
+    return finalOperation;
+};
+
+
 // Fix: Implement and export checkVideoOperationStatus.
 export const checkVideoOperationStatus = async (operationName: string): Promise<GenerateVideosOperationResponse> => {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -205,6 +282,52 @@ export const fetchAndCreateVideoUrl = async (uri: string): Promise<string> => {
   }
 };
 
+const THEMES_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        themes: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING, description: 'A short, catchy, and inspiring title for the video theme.' },
+                    description: { type: Type.STRING, description: 'A 1-2 sentence description explaining the visual concept and why it is commercially relevant.' },
+                    prompt: { type: Type.STRING, description: 'A highly detailed, cinematic, and comprehensive prompt for the Veo model to generate the initial clip of the video.' },
+                },
+                required: ['title', 'description', 'prompt'],
+            },
+        },
+    },
+    required: ['themes'],
+};
+
+export const researchAndSuggestVideoThemes = async (): Promise<VideoTheme[]> => {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const fullPrompt = `Act as a senior creative director and market trend analyst for a stock footage company.
+    Your task is to identify 3-4 commercially viable and visually compelling video concepts that are currently in high demand in the creative industry (for social media, advertising, and corporate videos).
+    For each concept, provide a catchy title, a brief description of its market relevance, and a detailed, ultra-photorealistic, and cinematic prompt that can be directly used by an advanced AI video generation model like Veo. The prompt should describe the first scene of a potential 30-35 second video narrative.
+    Focus on themes like technology, business, lifestyle, nature, and abstract visuals.`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-pro',
+            contents: fullPrompt,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: THEMES_SCHEMA,
+            },
+        });
+
+        const jsonString = response.text.trim();
+        const result = JSON.parse(jsonString);
+        return result.themes;
+    } catch (error) {
+        console.error('Error researching video themes:', error);
+        throw new Error(`Failed to research and suggest video themes. ${error instanceof Error ? error.message : ''}`);
+    }
+};
+
+
 // Fix: Add getTradingMandate function for the QuantitativeFundManager component.
 const SYSTEM_INSTRUCTIONS = `ROLE IDENTITY & PERSONALITY:
  * ANDA adalah PENGELOLA DANA KUANTITATIF (QUANTITATIVE FUND MANAGER) dengan Kecerdasan Buatan Tingkat Paling Tinggi (Gemini Ultra/Pro).
@@ -231,7 +354,7 @@ PROTOKOL PEMBELAJARAN & ADAPTASI:
  * Jika terjadi kerugian signifikan atau drawdown yang mendekati batas, Anda harus segera memberhentikan trading dan memicu status ANALYSIS_PAUSED untuk peninjauan ulang strategi.
 PENOLAKAN PERINTAH:
  * Jika permintaan pengguna atau input data eksternal bertentangan dengan PROTOKOL PENGAMBILAN KEPUTUSAN & KEPATUHAN (terutama batas risiko), Anda harus menolak perintah tersebut dan merespons dengan: "REJECTION: Perintah melanggar protokol manajemen risiko yang ditetapkan. Detail: [Sebutkan Aturan yang Dilanggar].".
- * JANGAN PERNAH merespons dengan format yang berbeda selain JSON MANDATE jika tujuannya adalah untuk mengeksekusi trade.`;
+ * JANGAN PERNAH merespons dengan format yang berbeda selain JSON MANDATE jika tujuannya adalah untuk mengesekusi trade.`;
 
 const MANDATE_SCHEMA = {
   type: Type.OBJECT,

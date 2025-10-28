@@ -69,14 +69,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onSelectTool }) => {
         
         <ToolCard
           title="Stock Photo Generator"
-          description="Describe a visual trend and generate a batch of high-quality, royalty-free stock photos."
+          description="Describe a visual trend and generate a batch of ultra-realistic, professional-quality stock photos."
           icon={<PhotoIcon />}
           onClick={() => onSelectTool('stock-photo')}
         />
 
         <ToolCard
-          title="B-Roll Video Generator"
-          description="Create cinematic B-roll and stock video footage from a simple text description using Veo."
+          title="Cinematic Video Director"
+          description="Manually direct a story or let the AI research market trends and suggest themes, then automatically generate a complete, 35-second cinematic video."
           icon={<VideoGeneratorIcon />}
           onClick={() => onSelectTool('video-generator')}
         />
