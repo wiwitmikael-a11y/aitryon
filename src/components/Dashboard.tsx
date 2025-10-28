@@ -68,8 +68,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onSelectTool }) => {
         />
         
         <ToolCard
-          title="Stock Photo Generator"
-          description="Describe a visual trend and generate a batch of ultra-realistic, professional-quality stock photos."
+          title="AI Art Director"
+          description="Two modes: Use 'Art Director' mode for full creative control over style, or use 'Automated' mode to let AI research and produce a complete photo batch for you."
           icon={<PhotoIcon />}
           onClick={() => onSelectTool('stock-photo')}
         />

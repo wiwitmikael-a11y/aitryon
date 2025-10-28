@@ -14,6 +14,10 @@ export interface VideoTheme {
     prompt: string;
 }
 
+// Reusable AI instance
+const getAi = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+
 const METADATA_SCHEMA = {
   type: Type.OBJECT,
   properties: {
@@ -30,7 +34,7 @@ const METADATA_SCHEMA = {
 
 // Fix: Implement and export generateMetadataForAsset.
 export const generateMetadataForAsset = async (prompt: string, assetType: 'photo' | 'video'): Promise<AssetMetadata> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAi();
   const fullPrompt = `Generate metadata for a stock ${assetType} created from the following prompt. The metadata should be suitable for a stock media platform. The prompt is: "${prompt}"`;
 
   try {
@@ -47,50 +51,63 @@ export const generateMetadataForAsset = async (prompt: string, assetType: 'photo
     return JSON.parse(jsonString);
   } catch (error) {
     console.error('Error generating metadata:', error);
-    throw new Error(`Failed to generate metadata. ${error instanceof Error ? error.message : ''}`);
+    // Return a default metadata object on failure to avoid breaking the UI
+    return {
+        title: "Untitled Asset",
+        description: `Based on prompt: ${prompt}`,
+        tags: ["generated", assetType]
+    };
   }
 };
 
-const PROMPTS_SCHEMA = {
+const CONCEPTS_SCHEMA = {
   type: Type.OBJECT,
   properties: {
     prompts: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: 'An array of 3-5 distinct, detailed, and creative image generation prompts based on the trend.',
+      description: 'An array of 3-4 distinct, detailed, and creative image generation prompts.',
     },
   },
   required: ['prompts'],
 };
 
-// Fix: Implement and export analyzeTrendAndGeneratePrompts.
-export const analyzeTrendAndGeneratePrompts = async (topic: string): Promise<string[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const fullPrompt = `Analyze the following visual trend and generate 3-5 diverse, ultra-realistic prompts for a text-to-image AI. The prompts should be detailed, visually rich, and sound like they were conceptualized by a professional photographer. The trend is: "${topic}"`;
+export const generatePhotoConcepts = async (topic: string, style: string, palette: string, angle: string): Promise<string[]> => {
+    const ai = getAi();
+    const fullPrompt = `
+        Act as a world-class Art Director. Given the following creative direction, generate 3-4 diverse and master-level photo prompts.
+        - Core Topic: "${topic}"
+        - Photography Style: "${style}"
+        - Desired Color Palette: "${palette || 'any'}"
+        - Camera Angle/Shot: "${angle}"
+        
+        The prompts must be crafted to produce images of the absolute highest quality, either matching a professional award-winning photographer's work (for realistic scenes) or a master artisan's creation (for conceptual art). They should be visually rich, detailed, and ready for a state-of-the-art text-to-image AI like Imagen 4.0.
+    `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: fullPrompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: PROMPTS_SCHEMA,
-      },
-    });
-
-    const jsonString = response.text.trim();
-    const result = JSON.parse(jsonString);
-    return result.prompts;
-  } catch (error) {
-    console.error('Error analyzing trend:', error);
-    throw new Error(`Failed to analyze trend and generate prompts. ${error instanceof Error ? error.message : ''}`);
-  }
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-pro',
+            contents: fullPrompt,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: CONCEPTS_SCHEMA,
+            },
+        });
+        const jsonString = response.text.trim();
+        const result = JSON.parse(jsonString);
+        return result.prompts;
+    } catch (error) {
+        console.error('Error generating photo concepts:', error);
+        throw new Error(`Failed to generate concepts. ${error instanceof Error ? error.message : ''}`);
+    }
 };
 
+
 // Fix: Implement and export generateStockImage.
-export const generateStockImage = async (prompt: string): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const enhancedPrompt = `${prompt}, ultra-realistic, photorealistic, professional photography, 4k, sharp focus, detailed, cinematic lighting, shot on a professional camera.`;
+export const generateStockImage = async (prompt: string, variation: string = ""): Promise<string> => {
+  const ai = getAi();
+  const qualitySuffix = "masterpiece, ultra high-resolution 8k, professional photography, shot on a DSLR with a 50mm f/1.8 lens, intricate details, sharp focus, cinematic lighting, photorealistic, created by a master artisan";
+  const enhancedPrompt = `${prompt}, ${variation}, ${qualitySuffix}.`;
   try {
     const response = await ai.models.generateImages({
       model: 'imagen-4.0-generate-001',
@@ -114,6 +131,70 @@ export const generateStockImage = async (prompt: string): Promise<string> => {
   }
 };
 
+
+export const researchAndGeneratePhotoBatch = async (
+    topic: string, 
+    onProgress: (stage: 'researching' | 'concepting' | 'shooting' | 'metadata', message: string) => void
+): Promise<any[]> => {
+    const ai = getAi();
+    const BATCH_CONCEPTS = 3;
+    const VARIATIONS_PER_CONCEPT = 2;
+    const TOTAL_IMAGES = BATCH_CONCEPTS * VARIATIONS_PER_CONCEPT;
+
+    // 1. Deep Research and Concept Generation
+    onProgress('researching', 'Performing deep research...');
+    const researchPrompt = `
+        Act as a senior market researcher and world-class art director. Deeply analyze the topic "${topic}".
+        Identify ${BATCH_CONCEPTS} distinct, commercially viable, and visually compelling sub-themes.
+        For each sub-theme, create one master, ultra-detailed prompt for an AI image generator, designed to produce an image of the highest possible quality, rivaling professional photography or artisan creations.
+    `;
+    const researchResponse = await ai.models.generateContent({
+        model: 'gemini-2.5-pro',
+        contents: researchPrompt,
+        config: {
+            responseMimeType: 'application/json',
+            responseSchema: CONCEPTS_SCHEMA,
+        },
+    });
+    const concepts: string[] = JSON.parse(researchResponse.text.trim()).prompts;
+
+    if (concepts.length === 0) throw new Error("AI failed to generate any concepts.");
+
+    const finalAssets = [];
+
+    // 2. Generate images and metadata for each concept
+    for (let i = 0; i < concepts.length; i++) {
+        const concept = concepts[i];
+        onProgress('concepting', `Developing concept ${i + 1}/${concepts.length}`);
+
+        for (let j = 0; j < VARIATIONS_PER_CONCEPT; j++) {
+            const imageIndex = i * VARIATIONS_PER_CONCEPT + j + 1;
+            onProgress('shooting', `Generating image ${imageIndex}/${TOTAL_IMAGES}...`);
+            
+            try {
+                const src = await generateStockImage(concept, `variation ${j+1}`);
+                onProgress('metadata', `Finalizing metadata for image ${imageIndex}...`);
+                const metadata = await generateMetadataForAsset(concept, 'photo');
+
+                finalAssets.push({
+                    id: `auto-img-${i}-${j}`,
+                    prompt: concept,
+                    src,
+                    metadata,
+                    conceptGroup: `Concept ${i + 1}`,
+                });
+            } catch (e) {
+                console.error(`Failed to generate variation ${j+1} for concept ${i+1}:`, e);
+                // Continue to the next image even if one fails
+            }
+        }
+    }
+
+    return finalAssets;
+};
+
+
+
 const STRATEGY_SCHEMA = {
   type: Type.OBJECT,
   properties: {
@@ -133,10 +214,10 @@ const STRATEGY_SCHEMA = {
 
 // Fix: Implement and export generateCreativeStrategy.
 export const generateCreativeStrategy = async (topic: string, photoCount: number, videoCount: number): Promise<{ photoPrompts: string[], videoPrompts: string[] }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAi();
   const fullPrompt = `As an expert creative director, develop a content strategy for a marketing campaign about "${topic}".
-  Generate exactly ${photoCount} distinct, detailed, and visually rich prompts for ultra-realistic stock photos.
-  Generate exactly ${videoCount} distinct, detailed, and cinematic prompts for short (5-10 second) ultra-photorealistic stock video clips.
+  Generate exactly ${photoCount} distinct, detailed, and visually rich prompts for ultra-realistic stock photos of professional quality.
+  Generate exactly ${videoCount} distinct, detailed, and cinematic prompts for short (5-10 second) ultra-photorealistic stock video clips of professional quality.
   The prompts should be diverse and cover different aspects of the topic.`;
 
   try {
@@ -164,7 +245,7 @@ export const generateCreativeStrategy = async (topic: string, photoCount: number
 
 // Fix: Implement and export generateVideo.
 export const generateVideo = async (prompt: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAi();
   try {
     const operation = await ai.models.generateVideos({
       model: 'veo-3.1-fast-generate-preview',
@@ -187,7 +268,7 @@ export const generateAndExtendVideo = async (
     referenceImage: string | null,
     onProgress: (message: string) => void
 ): Promise<GenerateVideosOperationResponse> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAi();
     const EXTENSIONS = 4; // Base clip + 4 extensions = 5 clips total (~35 seconds)
     const TOTAL_STEPS = EXTENSIONS + 1;
 
@@ -254,7 +335,7 @@ export const generateAndExtendVideo = async (
 
 // Fix: Implement and export checkVideoOperationStatus.
 export const checkVideoOperationStatus = async (operationName: string): Promise<GenerateVideosOperationResponse> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAi();
     try {
         const operation = await ai.operations.getVideosOperation({ name: operationName });
         return operation;
@@ -302,7 +383,7 @@ const THEMES_SCHEMA = {
 };
 
 export const researchAndSuggestVideoThemes = async (): Promise<VideoTheme[]> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAi();
     const fullPrompt = `Act as a senior creative director and market trend analyst for a stock footage company.
     Your task is to identify 3-4 commercially viable and visually compelling video concepts that are currently in high demand in the creative industry (for social media, advertising, and corporate videos).
     For each concept, provide a catchy title, a brief description of its market relevance, and a detailed, ultra-photorealistic, and cinematic prompt that can be directly used by an advanced AI video generation model like Veo. The prompt should describe the first scene of a potential 30-35 second video narrative.
@@ -353,7 +434,7 @@ PROTOKOL PEMBELAJARAN & ADAPTASI:
  * Anda wajib menggunakan data hasil trade ini untuk melakukan Continuous Improvement pada parameter penalaran internal Anda.
  * Jika terjadi kerugian signifikan atau drawdown yang mendekati batas, Anda harus segera memberhentikan trading dan memicu status ANALYSIS_PAUSED untuk peninjauan ulang strategi.
 PENOLAKAN PERINTAH:
- * Jika permintaan pengguna atau input data eksternal bertentangan dengan PROTOKOL PENGAMBILAN KEPUTUSAN & KEPATUHAN (terutama batas risiko), Anda harus menolak perintah tersebut dan merespons dengan: "REJECTION: Perintah melanggar protokol manajemen risiko yang ditetapkan. Detail: [Sebutkan Aturan yang Dilanggar].".
+ * Jika permintaan pengguna atau input data eksternal bertentangan dengan PROTOKOL PENGAMBILAN KEPUTUSAN & KEPATUHAN (terutama batas risiko), Anda harus menolak perintah tersebut dan merespons dengan: "REJECTION: Perintah melanggar protokol manajemen risiko yang ditetapkan. Detail: [Sebutkan Aturan yang Dilangarr].".
  * JANGAN PERNAH merespons dengan format yang berbeda selain JSON MANDATE jika tujuannya adalah untuk mengesekusi trade.`;
 
 const MANDATE_SCHEMA = {
@@ -385,7 +466,7 @@ const MANDATE_SCHEMA = {
 };
 
 export const getTradingMandate = async (prompt: string): Promise<any> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAi();
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-pro',

@@ -11,8 +11,8 @@ const Header: React.FC<HeaderProps> = ({ activeTool, onNavigateHome }) => {
   const toolTitles: Record<Tool, string> = {
     'dashboard': 'AI Creative Suite',
     'try-on': 'Virtual Try-On',
-    'stock-photo': 'Stock Photo Generator',
-    'video-generator': 'B-Roll Video Generator',
+    'stock-photo': 'AI Art Director',
+    'video-generator': 'Cinematic Video Director',
     'creative-director': 'AI Creative Director'
   }
 
