@@ -10,9 +10,10 @@ export default defineConfig({
     }
   },
   plugins: [react()],
-  define: {
-    'process.env.GEMINI_API_KEY': JSON.stringify(process.env.GEMINI_API_KEY)
-  },
+  // The define block for GEMINI_API_KEY has been removed.
+  // This is a security risk as it exposes the key to the client-side code.
+  // The backend API (`/api/gemini-proxy`) securely accesses the API key
+  // directly from the server's environment variables.
   resolve: {
     alias: {
       '@': '/src',

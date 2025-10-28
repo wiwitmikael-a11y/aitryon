@@ -7,6 +7,8 @@ let tokenExpiry: Date | null = null;
 /**
  * Retrieves a Google Auth token for accessing Vertex AI APIs.
  * It uses a simple in-memory cache to avoid fetching a new token for every request.
+ * This function is hardened to explicitly read from the GOOGLE_CREDENTIALS_JSON
+ * environment variable for maximum stability on Vercel.
  */
 export async function getGoogleAuthToken(): Promise<string> {
     // If we have a valid, non-expired token, return it
@@ -16,7 +18,14 @@ export async function getGoogleAuthToken(): Promise<string> {
 
     // Otherwise, fetch a new token
     try {
+        if (!process.env.GOOGLE_CREDENTIALS_JSON) {
+            throw new Error("FATAL: GOOGLE_CREDENTIALS_JSON environment variable is not set.");
+        }
+
+        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+
         const auth = new GoogleAuth({
+            credentials,
             scopes: 'https://www.googleapis.com/auth/cloud-platform'
         });
 
@@ -38,6 +47,9 @@ export async function getGoogleAuthToken(): Promise<string> {
         // Reset cache in case of error
         authToken = null;
         tokenExpiry = null;
+        if (error instanceof SyntaxError) {
+             throw new Error('Failed to parse GOOGLE_CREDENTIALS_JSON. Please ensure it is a valid, unescaped JSON string in your environment variables.');
+        }
         throw new Error(`Failed to obtain Google authentication token. ${error instanceof Error ? error.message : ''}`);
     }
 }
