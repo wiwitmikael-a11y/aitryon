@@ -2,12 +2,13 @@ import React, { useRef, useState, useCallback, ChangeEvent } from 'react';
 import { UploadIcon } from './icons/UploadIcon';
 
 interface ImageUploaderProps {
-  onImageUpload: (base64: string) => void;
+  onImageUpload: (base64: string, file?: File) => void;
+  onCropRequest?: (base64: string) => void;
   label: string;
   initialImage?: string | null;
 }
 
-const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, initialImage }) => {
+const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, onCropRequest, label, initialImage }) => {
   const [preview, setPreview] = useState<string | null>(initialImage || null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -17,13 +18,16 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, ini
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64String = reader.result as string;
-        // For file objects, we create an object URL for preview to be efficient.
-        setPreview(URL.createObjectURL(file));
-        onImageUpload(base64String);
+        if (onCropRequest) {
+          onCropRequest(base64String);
+        } else {
+          setPreview(URL.createObjectURL(file));
+          onImageUpload(base64String, file);
+        }
       };
       reader.readAsDataURL(file);
     }
-  }, [onImageUpload]);
+  }, [onImageUpload, onCropRequest]);
 
   const handleClick = () => {
     inputRef.current?.click();
@@ -38,6 +42,11 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, ini
     }
   }
 
+  // Update preview if initialImage changes from outside (e.g., from history)
+  React.useEffect(() => {
+    setPreview(initialImage || null);
+  }, [initialImage]);
+
   return (
     <div className="flex flex-col items-center justify-center w-full">
       <p className="text-slate-300 font-semibold mb-2">{label}</p>
@@ -48,7 +57,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, label, ini
         {preview ? (
             <>
                 <img src={preview} alt="Preview" className="w-full h-full object-contain rounded-lg p-2" />
-                <button onClick={handleClear} className="absolute top-2 right-2 bg-red-600/80 hover:bg-red-500 text-white rounded-full p-1.5 shadow-md transition-transform transform hover:scale-110">
+                <button onClick={handleClear} className="absolute top-2 right-2 bg-red-600/80 hover:bg-red-500 text-white rounded-full p-1.5 shadow-md transition-transform transform hover:scale-110 z-10">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                     </svg>
