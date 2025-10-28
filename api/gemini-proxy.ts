@@ -1,3 +1,5 @@
+// FIX: Add Buffer import for Node.js environment in Vercel.
+import { Buffer } from 'buffer';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from '@google/genai';
 import { getAuthToken } from './lib/google-auth';
@@ -167,7 +169,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             case 'generateStockImage': {
                 const { prompt, aspectRatio, generateMetadata } = payload;
 
-                // FIX: Moved `safetySettings` from `config` to the top-level of the request.
                 const imageResponse = await geminiAi.models.generateImages({
                     model: STOCK_PHOTO_MODEL,
                     prompt: prompt,
@@ -176,12 +177,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         aspectRatio: aspectRatio,
                         outputMimeType: 'image/png',
                     },
-                    safetySettings: [
-                        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                    ],
                 });
                 
                 const base64ImageBytes = imageResponse?.generatedImages?.[0]?.image?.imageBytes;
@@ -233,13 +228,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             aspectRatio,
                             outputMimeType: 'image/png',
                         },
-                        // FIX: Moved `safetySettings` from `config` to the top-level of the request.
-                        safetySettings: [
-                            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                        ],
                     }).catch((e) => {
                         console.error(`Image generation failed for prompt: "${prompt}"`, e);
                         return { error: true, prompt };
