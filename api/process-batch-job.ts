@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db } from './lib/db.ts';
 import type { BatchJob, BatchImageResult } from '../src/types.ts';
-import { GoogleGenAI } from "https://esm.sh/@google/genai@^0.12.0";
+import { GoogleGenAI } from "@google/genai";
 
 // --- AUTHENTICATION ---
 // This background job is for PHOTO generation.

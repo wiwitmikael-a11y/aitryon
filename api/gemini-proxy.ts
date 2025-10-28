@@ -1,8 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI, Type } from "https://esm.sh/@google/genai@^0.12.0";
+import { GoogleGenAI, Type } from "@google/genai";
 import { getGoogleAuthToken } from './lib/google-auth.ts';
 import { VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, VEO_MODEL_ID } from '../src/constants.ts';
-import { Buffer } from "https://aistudiocdn.com/buffer@^6.0.3";
 
 
 // --- AUTHENTICATION SETUP ---
