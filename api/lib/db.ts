@@ -1,31 +1,36 @@
-import { kv } from "@vercel/kv";
-import type { Job, BatchJob } from '../../src/types';
+// A simple in-memory database for demonstration purposes.
+// In a real application, you would use a persistent database like Firestore, Redis, or a SQL database.
 
-// Use a union type for things we can store
-type Storable = Job | BatchJob;
+interface Job {
+    id: string;
+    state: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+    resultImageUrl?: string;
+    error?: string;
+    operationName?: string; // To store the long-running operation name from Vertex AI
+}
 
-const db = {
-  async get<T extends Storable>(id: string): Promise<T | null> {
-    // Vercel KV's get method returns the value or null if not found.
-    return kv.get<T>(id);
-  },
-  
-  async set<T extends Storable>(id: string, data: T): Promise<void> {
-    // Set the job with a Time-To-Live (TTL) of 24 hours (86400 seconds)
-    // to prevent old jobs from cluttering the database.
-    await kv.set(id, data, { ex: 86400 });
-  },
+const jobs = new Map<string, Job>();
 
-  async update<T extends Storable>(id: string, updates: Partial<T>): Promise<void> {
-    const data = await kv.get<T>(id);
-    if (data) {
-      const updatedData = { ...data, ...updates };
-      // When updating, also extend the TTL.
-      await kv.set(id, updatedData, { ex: 86400 });
-    } else {
-      console.warn(`Attempted to update a non-existent item with id: ${id}`);
+export async function createJob(id: string, initialState: Partial<Job> = {}): Promise<Job> {
+    const job: Job = {
+        id,
+        state: 'PENDING',
+        ...initialState
+    };
+    jobs.set(id, job);
+    return job;
+}
+
+export async function getJob(id: string): Promise<Job | undefined> {
+    return jobs.get(id);
+}
+
+export async function updateJob(id: string, updates: Partial<Job>): Promise<Job | undefined> {
+    const job = jobs.get(id);
+    if (job) {
+        const updatedJob = { ...job, ...updates };
+        jobs.set(id, updatedJob);
+        return updatedJob;
     }
-  },
-};
-
-export { db };
+    return undefined;
+}

@@ -1,9 +1,1 @@
-{
-  "builds": [
-    {
-      "src": "api/**/*.ts",
-      "use": "@vercel/node"
-    }
-  ],
-  "installCommand": "npm install"
-}
+full contents of vercel.json
