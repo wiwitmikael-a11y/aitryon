@@ -1,290 +1,231 @@
-import React, { useState, useCallback } from 'react';
-import { 
-    generatePhotoConcepts, 
-    generateStockImage, 
-    generateMetadataForAsset,
-    researchAndGeneratePhotoBatch
-} from '../services/geminiService';
-import type { AssetMetadata } from '../services/geminiService';
-
+import React, { useState } from 'react';
+import { generateStockImage, researchAndSuggestPhotoThemes } from '../services/geminiService';
+import type { VideoTheme as PhotoTheme } from '../services/geminiService'; // Reusing the type
 import { SpinnerIcon } from './icons/SpinnerIcon';
 import { DownloadIcon } from './icons/DownloadIcon';
-import { ArtDirectorIcon } from './icons/ArtDirectorIcon';
+import { PhotoIcon } from './icons/PhotoIcon';
 import { SearchIcon } from './icons/SearchIcon';
 
-interface GeneratedImage {
-    id: string;
-    prompt: string;
-    src: string;
-    metadata?: AssetMetadata;
-    conceptGroup: string;
-}
-
-type Mode = 'director' | 'auto';
-type AutoStage = 'idle' | 'researching' | 'concepting' | 'shooting' | 'metadata' | 'complete';
-
-const photographyStyles = ['Cinematic', 'Minimalist', 'Vintage / Retro', 'Macro / Close-Up', 'Drone / Aerial View', 'Product Photography', 'Photorealistic'];
-const cameraAngles = ['Eye-Level Shot', 'Low-Angle Shot', 'High-Angle Shot', 'Top-Down Flat Lay', 'Dutch Angle'];
+type Mode = 'manual' | 'auto';
+type ResearchStage = 'idle' | 'researching' | 'selection';
 
 const StockPhotoGenerator: React.FC = () => {
-    const [mode, setMode] = useState<Mode>('director');
+    const [mode, setMode] = useState<Mode>('manual');
     
-    // Director Mode State
-    const [topic, setTopic] = useState('');
-    const [style, setStyle] = useState(photographyStyles[0]);
-    const [palette, setPalette] = useState('');
-    const [angle, setAngle] = useState(cameraAngles[0]);
-    const [concepts, setConcepts] = useState<string[]>([]);
-    const [selectedConcept, setSelectedConcept] = useState<string | null>(null);
-    
-    // Auto Mode State
-    const [autoTopic, setAutoTopic] = useState('');
-    const [autoStage, setAutoStage] = useState<AutoStage>('idle');
-    const [progressMessage, setProgressMessage] = useState('');
+    // Manual mode states
+    const [prompt, setPrompt] = useState('');
+    const [aspectRatio, setAspectRatio] = useState('16:9');
 
-    // Shared State
-    const [images, setImages] = useState<GeneratedImage[]>([]);
+    // Auto mode states
+    const [topic, setTopic] = useState('');
+    const [researchStage, setResearchStage] = useState<ResearchStage>('idle');
+    const [themes, setThemes] = useState<PhotoTheme[]>([]);
+    
+    // Shared states
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [imageUrl, setImageUrl] = useState<string | null>(null);
 
-    const resetState = () => {
-        setTopic('');
-        setStyle(photographyStyles[0]);
-        setPalette('');
-        setAngle(cameraAngles[0]);
-        setConcepts([]);
-        setSelectedConcept(null);
-        setAutoTopic('');
-        setAutoStage('idle');
-        setProgressMessage('');
-        setImages([]);
+    const resetStateForModeChange = () => {
         setIsLoading(false);
         setError(null);
+        setImageUrl(null);
+        setPrompt('');
+        setTopic('');
+        setResearchStage('idle');
+        setThemes([]);
     };
 
     const handleModeChange = (newMode: Mode) => {
         if (isLoading) return;
-        resetState();
+        resetStateForModeChange();
         setMode(newMode);
     };
 
-    // --- Director Mode Functions ---
-    const handleGenerateConcepts = useCallback(async () => {
+    const handleStartResearch = async () => {
         if (!topic.trim()) {
-            setError('Please enter a topic.');
+            setError("Please enter a topic to research.");
             return;
         }
+        setResearchStage('researching');
         setIsLoading(true);
         setError(null);
-        setConcepts([]);
-        setSelectedConcept(null);
-        setImages([]);
-
+        setThemes([]);
         try {
-            const generatedConcepts = await generatePhotoConcepts(topic, style, palette, angle);
-            setConcepts(generatedConcepts);
+            const suggestedThemes = await researchAndSuggestPhotoThemes(topic);
+            setThemes(suggestedThemes);
+            setResearchStage('selection');
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to generate concepts.');
+            setError(err instanceof Error ? err.message : 'Failed to research themes.');
+            setResearchStage('idle');
         } finally {
             setIsLoading(false);
         }
-    }, [topic, style, palette, angle]);
-
-    const handleStartPhotoshoot = useCallback(async () => {
-        if (!selectedConcept) return;
-
-        setIsLoading(true);
-        setError(null);
-        setImages([]);
-
-        try {
-            // Generate 3 variations for the selected concept
-            const variations = Array.from({ length: 3 });
-            const imagePromises = variations.map((_, i) => 
-                generateStockImage(selectedConcept, `variation ${i+1}`).then(async (src) => {
-                    const metadata = await generateMetadataForAsset(selectedConcept, 'photo');
-                    return { id: `img-${i}`, prompt: selectedConcept, src, metadata, conceptGroup: 'Photoshoot' };
-                })
-            );
-
-            const results = await Promise.allSettled(imagePromises);
-            const successfulImages = results
-                .filter(res => res.status === 'fulfilled')
-                .map(res => (res as PromiseFulfilledResult<GeneratedImage>).value);
-            
-            setImages(successfulImages);
-
-            if (successfulImages.length < variations.length) {
-                setError('Some image variations could not be generated.');
-            }
-
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to generate image variations.');
-        } finally {
-            setIsLoading(false);
-        }
-    }, [selectedConcept]);
-
-
-    // --- Automated Mode Functions ---
-    const handleStartAutomatedProduction = async () => {
-        if (!autoTopic.trim()) {
-            setError('Please enter a topic.');
-            return;
-        }
-        resetState(); // Clear everything except the autoTopic and mode
-        setAutoTopic(autoTopic);
-        setMode('auto');
-        setIsLoading(true);
-
-        try {
-            const generatedAssets = await researchAndGeneratePhotoBatch(autoTopic, (stage, message) => {
-                setAutoStage(stage);
-                setProgressMessage(message);
-            });
-            setImages(generatedAssets);
-            setAutoStage('complete');
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Automated production failed.');
-            setAutoStage('idle');
-        } finally {
-            setIsLoading(false);
-        }
-    }
-
-
-    // --- Shared Functions ---
-    const handleDownload = (src: string, prompt: string) => {
-        const link = document.createElement('a');
-        link.href = src;
-        const shortPrompt = prompt.split(' ').slice(0, 5).join('-').replace(/[^a-zA-Z0-9-]/g, '');
-        link.download = `stock-photo-${shortPrompt}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    };
+    
+    const handleThemeSelection = (selectedTheme: PhotoTheme) => {
+        setPrompt(selectedTheme.prompt);
+        // Switch to manual mode to show the prompt and allow generation
+        setMode('manual');
+        setResearchStage('idle');
+        // Clear auto-mode state
+        setTopic('');
+        setThemes([]);
     };
 
-    // --- Render Functions ---
+    const handleGenerate = async () => {
+        if (!prompt.trim()) {
+            setError("Please enter a prompt.");
+            return;
+        }
 
-    const renderImageResults = () => (
-        <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-            <h2 className="text-2xl font-bold text-cyan-400 mb-4">
-                {mode === 'director' ? '3. Photoshoot Results' : 'Production Complete!'}
-            </h2>
-            {isLoading && autoStage !== 'complete' ? (
-                 <div className="flex justify-center items-center py-8"><SpinnerIcon /></div>
-            ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {images.map((img) => (
-                        <div key={img.id} className="group relative aspect-square bg-slate-900 rounded-lg overflow-hidden shadow-md">
-                            <img src={img.src} alt={img.prompt} className="w-full h-full object-cover"/>
-                            <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-between">
-                                <div>
-                                    <p className="text-xs font-bold text-cyan-400 mb-1">{img.metadata?.title}</p>
-                                    <p className="text-xs text-slate-300 mb-2 overflow-hidden max-h-16">{img.metadata?.description}</p>
-                                </div>
-                                <button 
-                                    onClick={() => handleDownload(img.src, img.prompt)}
-                                    className="self-end p-2 rounded-full bg-slate-700/80 hover:bg-green-600 text-white transition-colors" title="Download Image">
-                                    <DownloadIcon />
-                                </button>
-                            </div>
-                        </div>
-                    ))}
+        setIsLoading(true);
+        setError(null);
+        setImageUrl(null);
+
+        try {
+            // Using a hardcoded aspect ratio for now, but this could be a user setting.
+            const url = await generateStockImage(prompt, aspectRatio);
+            setImageUrl(url);
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+            setError(errorMessage);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const renderResult = () => {
+        if (isLoading && researchStage !== 'researching') {
+            return (
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                    <SpinnerIcon />
+                    <p className="text-slate-300 mt-4 text-lg font-semibold">Directing your photoshoot...</p>
+                    <p className="text-slate-400 text-sm">High-quality images take a moment to generate.</p>
                 </div>
-            )}
-            {mode === 'auto' && autoStage === 'complete' && (
-                 <button onClick={resetState} className="text-cyan-400 hover:underline mt-6 mx-auto block">Start New Research</button>
-            )}
-        </div>
-    );
+            );
+        }
 
-    const renderDirectorMode = () => (
-        <div className="space-y-8">
-            {/* Step 1: Art Direction */}
-            <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                <h2 className="text-2xl font-bold text-cyan-400 mb-4">1. Provide Art Direction</h2>
-                <p className="text-slate-400 mb-4 text-sm">Your direction will be combined with advanced prompts to generate images using Imagen's highest quality model, aiming for the quality of a professional photographer or artisan.</p>
-                <div className="space-y-4">
-                     <textarea value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="e.g., 'A developer focused on their code at night'" className="w-full h-20 p-3 bg-slate-700/50 border border-slate-600 rounded-lg" disabled={isLoading} />
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <select value={style} onChange={e => setStyle(e.target.value)} className="p-2 bg-slate-700/50 border border-slate-600 rounded-lg">
-                            {photographyStyles.map(s => <option key={s}>{s}</option>)}
-                        </select>
-                         <input type="text" value={palette} onChange={e => setPalette(e.target.value)} placeholder="Color Palette (e.g., 'warm autumn tones')" className="p-2 bg-slate-700/50 border border-slate-600 rounded-lg" />
-                         <select value={angle} onChange={e => setAngle(e.target.value)} className="p-2 bg-slate-700/50 border border-slate-600 rounded-lg">
-                            {cameraAngles.map(a => <option key={a}>{a}</option>)}
+        if (error) {
+            return (
+                 <div className="flex flex-col items-center justify-center h-full text-center bg-red-900/20 p-4 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-red-400 mt-4 font-semibold">An Error Occurred</p>
+                    <p className="text-slate-300 mt-2 text-sm break-words">{error}</p>
+                </div>
+            );
+        }
+
+        if (imageUrl) {
+            return (
+                <div className="flex flex-col items-center gap-4">
+                    <img src={imageUrl} alt={prompt} className="w-full h-auto max-h-[60vh] object-contain rounded-lg shadow-2xl bg-black" />
+                    <a href={imageUrl} download={`stock-photo-${Date.now()}.png`} className="mt-4 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-full transition-colors duration-300 flex items-center gap-2">
+                        <DownloadIcon /> Download Image
+                    </a>
+                </div>
+            );
+        }
+        
+        return (
+            <div className="flex flex-col items-center justify-center h-full text-center text-slate-500">
+                <PhotoIcon />
+                <p className="mt-4">Your generated stock photo will appear here.</p>
+            </div>
+        );
+    };
+
+    const renderManualMode = () => (
+        <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg space-y-4">
+                    <h2 className="text-2xl font-bold text-cyan-400">1. Direct the Photoshoot</h2>
+                    <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., 'A minimalist workspace with a laptop, a cup of coffee, and a plant, top-down view, cinematic lighting...'" className="w-full h-48 p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500" disabled={isLoading} />
+                    <div>
+                        <label htmlFor="aspectRatio" className="block text-slate-300 font-semibold mb-2">Aspect Ratio:</label>
+                        <select id="aspectRatio" value={aspectRatio} onChange={e => setAspectRatio(e.target.value)} className="w-full p-2 bg-slate-700/50 border border-slate-600 rounded-lg" disabled={isLoading}>
+                            <option value="16:9">16:9 (Landscape)</option>
+                            <option value="9:16">9:16 (Portrait)</option>
+                            <option value="1:1">1:1 (Square)</option>
+                            <option value="4:3">4:3 (Standard)</option>
+                            <option value="3:4">3:4 (Standard Portrait)</option>
                         </select>
                     </div>
                 </div>
-                <button onClick={handleGenerateConcepts} disabled={isLoading || !topic.trim()} className="mt-6 w-full max-w-xs mx-auto flex items-center justify-center bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg">
-                    {isLoading ? <SpinnerIcon /> : 'Generate Concepts'}
+                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
+                    <h2 className="text-2xl font-bold text-cyan-400 mb-6 text-center">2. View Result</h2>
+                    <div className="w-full min-h-[400px] flex items-center justify-center bg-slate-900/50 rounded-lg p-4">
+                        {renderResult()}
+                    </div>
+                </div>
+            </div>
+             <div className="sticky bottom-0 left-0 right-0 -mx-4 md:-mx-8 mt-8 p-4 bg-slate-900/80 backdrop-blur-sm border-t border-slate-700/50 flex justify-center">
+                 <button onClick={handleGenerate} disabled={isLoading || !prompt.trim()} className="w-full max-w-md bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-4 px-8 rounded-full text-lg shadow-lg transition-all">
+                    {isLoading ? 'Generating Image...' : '✨ Generate Stock Photo'}
                 </button>
             </div>
+        </>
+    );
 
-            {/* Step 2: Select Concept */}
-            {(isLoading || concepts.length > 0) && (
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                    <h2 className="text-2xl font-bold text-cyan-400 mb-4">2. Select a Concept</h2>
-                    {isLoading && concepts.length === 0 ? (
-                         <div className="flex justify-center py-8"><SpinnerIcon /></div>
-                    ) : (
-                        <div className="space-y-3">
-                            {concepts.map((p, i) => (
-                                <button key={i} onClick={() => setSelectedConcept(p)} disabled={isLoading} className={`w-full text-left p-3 border rounded-md text-sm transition-colors ${selectedConcept === p ? 'bg-cyan-900/50 border-cyan-500' : 'bg-slate-700/50 border-slate-700 hover:bg-slate-700'}`}>
-                                    {p}
-                                </button>
-                            ))}
+    const renderAutoMode = () => {
+        switch (researchStage) {
+            case 'idle':
+                return (
+                    <div className="text-center p-8 bg-slate-800/50 rounded-2xl space-y-4">
+                        <h2 className="text-2xl font-bold text-cyan-400">Automated Art Director</h2>
+                        <p className="text-slate-400 max-w-2xl mx-auto">Provide a topic, and the AI will research visual trends and suggest commercially viable photo concepts for you to generate.</p>
+                        <div className="max-w-xl mx-auto">
+                             <label htmlFor="topic" className="sr-only">Topic</label>
+                            <input type="text" id="topic" value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g., 'The future of renewable energy'" className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-full focus:ring-2 focus:ring-cyan-500" disabled={isLoading} />
                         </div>
-                    )}
-                    {selectedConcept && (
-                         <button onClick={handleStartPhotoshoot} disabled={isLoading} className="mt-6 w-full max-w-xs mx-auto flex items-center justify-center bg-green-600 hover:bg-green-500 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg">
-                             {isLoading ? <SpinnerIcon /> : 'Start Photoshoot'}
+                        <button onClick={handleStartResearch} disabled={isLoading || !topic.trim()} className="bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-8 rounded-full text-lg shadow-lg flex items-center gap-2 mx-auto">
+                            <SearchIcon /> Research Photo Concepts
                         </button>
-                    )}
-                </div>
-            )}
-            
-            {(isLoading && images.length === 0 && selectedConcept) || images.length > 0 ? renderImageResults() : null}
-        </div>
-    );
-
-    const renderAutomatedMode = () => (
-        <div className="space-y-8">
-            {autoStage === 'idle' && (
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                    <h2 className="text-2xl font-bold text-cyan-400 mb-4">Automated Production</h2>
-                     <p className="text-slate-400 mb-4">Enter a high-level topic. The AI will perform deep research, develop multiple concepts, and generate a complete batch of professional stock photos aiming for the highest artistic and photorealistic quality.</p>
-                     <textarea value={autoTopic} onChange={(e) => setAutoTopic(e.target.value)} placeholder="e.g., 'The future of sustainable energy', 'Global financial markets', 'AI in healthcare'" className="w-full h-24 p-3 bg-slate-700/50 border border-slate-600 rounded-lg" />
-                     <button onClick={handleStartAutomatedProduction} disabled={!autoTopic.trim()} className="mt-4 w-full max-w-sm mx-auto flex items-center justify-center bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg">
-                         <SearchIcon /> <span className="ml-2">Start Research & Production</span>
-                    </button>
-                </div>
-            )}
-
-            {autoStage !== 'idle' && autoStage !== 'complete' && (
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg text-center">
-                    <SpinnerIcon />
-                    <h2 className="text-xl font-semibold text-white mt-4">{progressMessage}</h2>
-                    <p className="text-slate-400">AI is working... This may take a few moments.</p>
-                </div>
-            )}
-             
-            {autoStage === 'complete' && renderImageResults()}
-        </div>
-    );
+                    </div>
+                );
+            case 'researching':
+                 return (
+                    <div className="text-center p-8 bg-slate-800/50 rounded-2xl">
+                         <SpinnerIcon />
+                         <p className="text-slate-300 mt-4 text-lg">Researching visual trends...</p>
+                         <p className="text-slate-400 text-sm">This may take a moment.</p>
+                    </div>
+                 );
+            case 'selection':
+                return (
+                     <div className="bg-slate-800/50 p-6 rounded-2xl">
+                         <h2 className="text-2xl font-bold text-cyan-400 mb-4">Select a Photo Concept</h2>
+                         <p className="text-slate-400 mb-6">Choose a concept to load its detailed prompt into the Manual Mode for generation.</p>
+                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {themes.map((theme, index) => (
+                                <div key={index} className="bg-slate-900/50 p-4 rounded-lg flex flex-col justify-between">
+                                    <div>
+                                        <h3 className="font-bold text-white mb-2">{theme.title}</h3>
+                                        <p className="text-sm text-slate-400 mb-4">{theme.description}</p>
+                                    </div>
+                                    <button onClick={() => handleThemeSelection(theme)} className="w-full mt-auto bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 px-4 rounded-full transition-colors">
+                                        Use This Concept
+                                    </button>
+                                </div>
+                            ))}
+                         </div>
+                     </div>
+                );
+        }
+    };
 
     return (
         <div className="space-y-8">
-             <div className="flex justify-center bg-slate-800/50 p-1 rounded-full max-w-sm mx-auto">
-                <button onClick={() => handleModeChange('director')} className={`w-1/2 py-2 rounded-full text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${mode === 'director' ? 'bg-cyan-500 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>
-                    <ArtDirectorIcon /> Art Director
-                </button>
-                <button onClick={() => handleModeChange('auto')} className={`w-1/2 py-2 rounded-full text-sm font-semibold transition-colors ${mode === 'auto' ? 'bg-cyan-500 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Automated</button>
+            <div className="flex justify-center bg-slate-800/50 p-1 rounded-full max-w-sm mx-auto">
+                <button onClick={() => handleModeChange('manual')} className={`w-1/2 py-2 rounded-full text-sm font-semibold transition-colors ${mode === 'manual' ? 'bg-cyan-500 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Manual Direction</button>
+                <button onClick={() => handleModeChange('auto')} className={`w-1/2 py-2 rounded-full text-sm font-semibold transition-colors ${mode === 'auto' ? 'bg-cyan-500 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Automated Research</button>
             </div>
-            {error && <div className="bg-red-900/20 p-4 rounded-lg text-center text-red-400">{error}</div>}
-
-            {mode === 'director' ? renderDirectorMode() : renderAutomatedMode()}
+            
+            {error && mode === 'manual' && <div className="bg-red-900/20 p-4 rounded-lg text-center text-red-400">{error}</div>}
+            
+            {mode === 'manual' ? renderManualMode() : renderAutoMode()}
         </div>
     );
 };
