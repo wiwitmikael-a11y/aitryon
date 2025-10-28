@@ -7,7 +7,7 @@ import {
     fetchAndCreateVideoUrl,
     generateMetadataForAsset
 } from '../services/geminiService';
-import type { AssetMetadata } from '../services/geminiService';
+import type { AssetMetadata, GeneratedImage } from '../services/geminiService';
 import { createContentPackageZip } from '../utils/zipUtils';
 
 import { SearchIcon } from './icons/SearchIcon';
@@ -68,7 +68,8 @@ const CreativeDirector: React.FC = () => {
         setError(null);
         setAssets([]);
         try {
-            const { photoPrompts, videoPrompts } = await generateCreativeStrategy(topic, photoCount, videoCount);
+            // Fix: Pass arguments as a single object.
+            const { photoPrompts, videoPrompts } = await generateCreativeStrategy({ topic, photoCount, videoCount });
             const newAssets: Asset[] = [
                 ...photoPrompts.map((prompt, i) => ({ id: `photo-${i}`, type: 'photo' as const, prompt, status: 'pending' as const })),
                 ...videoPrompts.map((prompt, i) => ({ id: `video-${i}`, type: 'video' as const, prompt, status: 'pending' as const })),
@@ -96,11 +97,12 @@ const CreativeDirector: React.FC = () => {
     const processPhotoAsset = async (id: string, prompt: string) => {
         updateAssetState(id, { status: 'generating' });
         try {
-            const [src, metadata] = await Promise.all([
-                generateStockImage(prompt),
+            // Fix: Pass correct arguments to generateStockImage and handle its object return type.
+            const [imageResult, metadata] = await Promise.all([
+                generateStockImage(prompt, '16:9', false),
                 generateMetadataForAsset(prompt, 'photo')
             ]);
-            updateAssetState(id, { status: 'complete', src, metadata });
+            updateAssetState(id, { status: 'complete', src: imageResult.src, metadata });
         } catch (err) {
             const error = err instanceof Error ? err.message : 'Generation failed.';
             updateAssetState(id, { status: 'failed', error });

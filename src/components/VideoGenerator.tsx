@@ -79,6 +79,9 @@ const VideoGenerator: React.FC = () => {
                 setProgressMessage(message);
             });
 
+            // Fix: Set progress message after long polling is complete.
+            setProgressMessage('Video complete! Downloading file...');
+            // Fix: The service now returns the operation object, so this property access is correct.
             const uri = finalOperation.response?.generatedVideos?.[0]?.video?.uri;
             if (uri) {
                 const url = await fetchAndCreateVideoUrl(uri);

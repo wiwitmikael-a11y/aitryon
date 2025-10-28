@@ -16,7 +16,8 @@
     "jszip": "^3.10.1",
     "google-auth-library": "^10.4.2",
     "@vercel/node": "^5.5.0",
-    "@vercel/kv": "^1.0.1"
+    "@vercel/kv": "^1.0.1",
+    "buffer": "^6.0.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
