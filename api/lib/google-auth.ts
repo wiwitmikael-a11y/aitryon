@@ -1,55 +1,36 @@
 import { GoogleAuth } from 'google-auth-library';
 
-// Simple in-memory cache for the auth token
-let authToken: string | null = null;
-let tokenExpiry: Date | null = null;
+let authToken: string | null | undefined = undefined;
+let tokenExpiration: Date | null = null;
+
+const scopes = ['https://www.googleapis.com/auth/cloud-platform'];
 
 /**
- * Retrieves a Google Auth token for accessing Vertex AI APIs.
- * It uses a simple in-memory cache to avoid fetching a new token for every request.
- * This function is hardened to explicitly read from the GOOGLE_CREDENTIALS_JSON
- * environment variable for maximum stability on Vercel.
+ * Retrieves a Google Cloud authentication token.
+ * It caches the token and refreshes it when it's about to expire.
  */
-export async function getGoogleAuthToken(): Promise<string> {
-    // If we have a valid, non-expired token, return it
-    if (authToken && tokenExpiry && new Date() < tokenExpiry) {
+export async function getAuthToken(): Promise<string> {
+    // Return cached token if it's still valid
+    if (authToken && tokenExpiration && new Date() < tokenExpiration) {
         return authToken;
     }
 
-    // Otherwise, fetch a new token
     try {
-        if (!process.env.GOOGLE_CREDENTIALS_JSON) {
-            throw new Error("FATAL: GOOGLE_CREDENTIALS_JSON environment variable is not set.");
-        }
-
-        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
-
-        const auth = new GoogleAuth({
-            credentials,
-            scopes: 'https://www.googleapis.com/auth/cloud-platform'
-        });
-
+        const auth = new GoogleAuth({ scopes });
         const client = await auth.getClient();
-        const accessToken = await client.getAccessToken();
+        const token = await client.getAccessToken();
 
-        if (!accessToken.token || !accessToken.res?.data.expires_in) {
-            throw new Error('Failed to retrieve Google Auth token: Token or expiry information is missing.');
+        if (!token.token || !token.expiry_date) {
+            throw new Error('Failed to retrieve a valid auth token.');
         }
 
-        authToken = accessToken.token;
-        // Set expiry to 5 minutes before the actual expiry to be safe
-        const expiresInSeconds = accessToken.res.data.expires_in;
-        tokenExpiry = new Date(new Date().getTime() + (expiresInSeconds - 300) * 1000);
+        authToken = token.token;
+        // Set expiration to 5 minutes before the actual expiry to be safe
+        tokenExpiration = new Date(token.expiry_date - 5 * 60 * 1000);
         
         return authToken;
     } catch (error) {
-        console.error("Error getting Google Auth token:", error);
-        // Reset cache in case of error
-        authToken = null;
-        tokenExpiry = null;
-        if (error instanceof SyntaxError) {
-             throw new Error('Failed to parse GOOGLE_CREDENTIALS_JSON. Please ensure it is a valid, unescaped JSON string in your environment variables.');
-        }
-        throw new Error(`Failed to obtain Google authentication token. ${error instanceof Error ? error.message : ''}`);
+        console.error('Error getting auth token:', error);
+        throw new Error('Could not authenticate with Google Cloud.');
     }
 }
