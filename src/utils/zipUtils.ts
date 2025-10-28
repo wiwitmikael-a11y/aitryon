@@ -36,6 +36,7 @@ export const createContentPackageZip = async (assets: Asset[]): Promise<void> =>
         '"filename","type","title","description","tags","prompt"'
     ];
 
+    // The order is preserved here, matching the generated assets order.
     for (const asset of successfulAssets) {
         try {
             const response = await fetch(asset.src!);
@@ -46,7 +47,9 @@ export const createContentPackageZip = async (assets: Asset[]): Promise<void> =>
 
             zip.file(filename, blob);
             
-            const tags = asset.metadata?.tags.join(', ') || '';
+            // Format tags with # and space separation for easy copy-paste.
+            const tags = asset.metadata?.tags.map(t => `#${t}`).join(' ') || '';
+            
             metadataCsvRows.push(
                 [
                     escapeCsvField(filename),
@@ -63,7 +66,8 @@ export const createContentPackageZip = async (assets: Asset[]): Promise<void> =>
         }
     }
     
-    zip.file("metadata.csv", metadataCsvRows.join('\n'));
+    // Save as .xls to be opened by Excel/Sheets directly into neat columns.
+    zip.file("metadata.xls", metadataCsvRows.join('\n'));
 
     zip.generateAsync({ type: "blob" }).then(content => {
         const link = document.createElement('a');
