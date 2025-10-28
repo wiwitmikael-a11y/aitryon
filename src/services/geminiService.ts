@@ -1,76 +1,86 @@
-import type { AssetMetadata } from '../types';
+import type { BatchJob } from '../types';
 
-// Re-export for components that use it
-export type { AssetMetadata };
+export interface AssetMetadata {
+    title: string;
+    description: string;
+    tags: string[];
+}
 
-async function callGeminiApi<T>(action: string, payload: unknown): Promise<T> {
+export interface StockImageResult {
+    src: string; // base64 data url
+    metadata?: AssetMetadata;
+}
+
+async function callGeminiProxy<T = any>(task: string, payload: object): Promise<T> {
     const response = await fetch('/api/gemini-proxy', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ action, payload }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, ...payload }),
     });
 
     const data = await response.json();
-
     if (!response.ok) {
-        throw new Error(data.message || 'An API error occurred.');
+        throw new Error(data.error || 'An unknown error occurred calling the Gemini proxy.');
     }
-
     return data;
 }
 
-export const generatePhotoConcepts = async (
-    topic: string,
-    style: string,
-    palette: string,
-    angle: string
-): Promise<{ concepts: string[] }> => {
-    return callGeminiApi('generatePhotoConcepts', { topic, style, palette, angle });
+export const generateCreativeStrategy = async (
+    { topic, photoCount, videoCount }: { topic: string, photoCount: number, videoCount: number }
+): Promise<{ photoPrompts: string[], videoPrompts: string[] }> => {
+    return callGeminiProxy('generateCreativeStrategy', { topic, photoCount, videoCount });
 };
 
 export const generateStockImage = async (
-    prompt: string, 
-    aspectRatio: string, 
-    withMetadata: boolean = false
-): Promise<{ src: string; metadata?: AssetMetadata }> => {
-    const { src } = await callGeminiApi<{ src: string }>('generateStockImage', { prompt, aspectRatio });
-    if (withMetadata) {
-        const metadata = await generateMetadataForAsset(prompt, 'photo');
-        return { src, metadata };
-    }
-    return { src };
-};
-
-export const generateMetadataForAsset = async (
     prompt: string,
-    type: 'photo' | 'video'
-): Promise<AssetMetadata> => {
-    return callGeminiApi('generateMetadataForAsset', { prompt, type });
+    aspectRatio: '1:1' | '16:9' | '9:16' = '16:9',
+    generateMetadata = false
+): Promise<StockImageResult> => {
+    return callGeminiProxy('generateStockImage', { prompt, aspectRatio, generateMetadata });
 };
 
-export const generateCreativeStrategy = async (payload: {
-    topic: string;
-    photoCount: number;
-    videoCount: number;
-}): Promise<{ photoPrompts: string[], videoPrompts: string[] }> => {
-    return callGeminiApi('generateCreativeStrategy', payload);
-};
-
-export const getTradingMandate = async (prompt: string): Promise<any> => {
-    return callGeminiApi('getTradingMandate', { prompt });
-};
-
-export const generateVideo = async (prompt: string, image?: { imageBytes: string, mimeType: string }): Promise<{ name: string }> => {
-    return callGeminiApi('generateVideo', { prompt, image });
+export const generateVideo = async (prompt: string, image?: { imageBytes: string; mimeType: string; }): Promise<any> => {
+    return callGeminiProxy('generateVideo', { prompt, image });
 };
 
 export const checkVideoOperationStatus = async (operationName: string): Promise<any> => {
-    return callGeminiApi('checkVideoOperationStatus', { operationName });
+    return callGeminiProxy('checkVideoOperationStatus', { operationName });
 };
 
 export const fetchAndCreateVideoUrl = async (uri: string): Promise<string> => {
-    const { dataUrl } = await callGeminiApi<{ dataUrl: string }>('fetchVideo', { uri });
-    return dataUrl;
+    const data = await callGeminiProxy<{ videoBytes: string }>('fetchVideo', { uri });
+    return `data:video/mp4;base64,${data.videoBytes}`;
+};
+
+export const generateMetadataForAsset = async (prompt: string, type: 'photo' | 'video'): Promise<AssetMetadata> => {
+    return callGeminiProxy('generateMetadataForAsset', { prompt, type });
+};
+
+export const getTradingMandate = async (prompt: string): Promise<any> => {
+    return callGeminiProxy('getTradingMandate', { prompt });
+};
+
+// Batch job services for Stock Photo Generator
+export const startBatchImageJob = async (prompts: string[]): Promise<{ jobId: string }> => {
+    const response = await fetch('/api/start-batch-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data.message || 'Failed to submit batch job.');
+    }
+    return data;
+};
+
+export const checkBatchImageJobStatus = async (jobId: string): Promise<BatchJob> => {
+    const response = await fetch(`/api/get-batch-status?jobId=${jobId}`);
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.message || 'Failed to fetch batch job status.');
+    }
+    return data.job;
 };

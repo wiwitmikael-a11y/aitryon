@@ -1,74 +1,86 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db } from './lib/db';
-import type { BatchJob, BatchJobResult } from '../src/types';
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from '@google/genai';
+import type { BatchJob, BatchImageResult } from '../src/types';
+import { GoogleGenAI } from "@google/genai";
 
-const getAi = () => new GoogleGenAI({ apiKey: process.env.API_KEY! });
+if (!process.env.API_KEY) {
+    throw new Error("API_KEY environment variable is not set.");
+}
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const safetySettings = [
-  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-];
 
-export default async function handler(
-  req: VercelRequest,
-  res: VercelResponse,
-) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method Not Allowed' });
-  }
+async function generateImageForPrompt(prompt: string): Promise<{src: string}> {
+    const imageResponse = await ai.models.generateImages({
+        model: 'imagen-4.0-generate-001',
+        prompt: prompt,
+        config: {
+            numberOfImages: 1,
+            aspectRatio: '16:9',
+            outputMimeType: "image/png"
+        },
+    });
+    
+    const image = imageResponse.generatedImages[0];
+    if (!image?.image.imageBytes) throw new Error("Image generation failed, no bytes returned.");
 
-  const { jobId } = req.body;
+    const src = `data:image/png;base64,${image.image.imageBytes}`;
+    return { src };
+}
 
-  if (!jobId || typeof jobId !== 'string') {
-    return res.status(400).json({ message: 'Missing or invalid jobId' });
-  }
-  
-  res.status(202).end();
 
-  try {
-    const job = await db.get<BatchJob>(jobId);
-    if (!job) {
-      console.error(`Batch job not found: ${jobId}`);
-      return;
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+    if (req.method !== 'POST') {
+        return res.status(405).json({ message: 'Method Not Allowed' });
     }
 
-    await db.update<BatchJob>(jobId, { status: 'PROCESSING_IMAGES' });
+    const { jobId } = req.body;
+    if (!jobId || typeof jobId !== 'string') {
+        return res.status(400).json({ message: 'Missing or invalid jobId' });
+    }
+  
+    // Respond quickly to the caller
+    res.status(202).end();
 
-    const ai = getAi();
-    const results: BatchJobResult[] = [];
+    let job: BatchJob | null = null;
+    try {
+        job = await db.get<BatchJob>(jobId);
+        if (!job) {
+            console.error(`Batch job not found: ${jobId}`);
+            return;
+        }
 
-    for (const prompt of job.prompts) {
-        try {
-            const response = await ai.models.generateImages({
-                model: 'imagen-4.0-generate-001',
-                prompt,
-                config: {
-                    numberOfImages: 1,
-                    aspectRatio: '16:9',
-                    outputMimeType: 'image/png',
-                }
-            });
-            const image = response.generatedImages[0];
-            const src = `data:image/png;base64,${image.image.imageBytes}`;
-            results.push({ prompt, src });
+        await db.update<BatchJob>(jobId, { status: 'PROCESSING' });
+        
+        const updatedResults = [...job.results];
+
+        for (let i = 0; i < job.prompts.length; i++) {
+            const prompt = job.prompts[i];
+            const resultIndex = updatedResults.findIndex(r => r.id === `image-${i}`);
             
-            // Update DB after each successful generation
-            await db.update<BatchJob>(jobId, { results: [...results] });
+            if (resultIndex === -1) continue;
 
-        } catch (imageError) {
-             console.error(`Error generating image for prompt in job ${jobId}: "${prompt}"`, imageError);
-             // Continue to the next prompt
+            updatedResults[resultIndex].status = 'generating';
+            await db.update<BatchJob>(jobId, { results: updatedResults });
+
+            try {
+                const { src } = await generateImageForPrompt(prompt);
+                updatedResults[resultIndex].status = 'complete';
+                updatedResults[resultIndex].src = src;
+            } catch (error) {
+                updatedResults[resultIndex].status = 'failed';
+                updatedResults[resultIndex].error = error instanceof Error ? error.message : 'Unknown generation error.';
+                console.error(`Failed to generate image for prompt: "${prompt}"`, error);
+            }
+            await db.update<BatchJob>(jobId, { results: updatedResults });
+        }
+        
+        await db.update<BatchJob>(jobId, { status: 'COMPLETED' });
+
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'An unknown processing error occurred.';
+        console.error(`Error processing batch job ${jobId}:`, error);
+        if (jobId) {
+             await db.update<BatchJob>(jobId, { status: 'FAILED', error: errorMessage });
         }
     }
-    
-    await db.update<BatchJob>(jobId, { status: 'COMPLETED' });
-
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'An unknown processing error occurred.';
-    console.error(`Error processing batch job ${jobId}:`, error);
-    await db.update<BatchJob>(jobId, { status: 'FAILED', error: errorMessage });
-  }
 }

@@ -1,9 +1,7 @@
-// For Virtual Try-On Job
-export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
-
+// For Virtual Try-On job
 export interface Job {
   id: string;
-  status: JobStatus;
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
   personImage: string;
   productImage: string;
   createdAt: number;
@@ -11,15 +9,15 @@ export interface Job {
   error?: string;
 }
 
-// For Virtual Try-On History
+// For Virtual Try-On history
 export interface HistoryItem {
-  id: string;
-  resultImage: string;
-  personImage: string;
-  productImage: string;
+    id: string;
+    personImage: string;
+    productImage: string;
+    resultImage: string;
 }
 
-// For Vertex AI API call in process-job.ts
+// For Virtual Try-On API call
 export interface VertexAIRequestInstance {
   personImage: {
     image: {
@@ -31,41 +29,37 @@ export interface VertexAIRequestInstance {
       image: {
         bytesBase64Encoded: string;
       };
-    },
+    }
   ];
 }
 
 export interface VertexAIRequestParameters {
   sampleCount: number;
-  personGeneration: 'allow_all' | 'disallow_all';
+  personGeneration: 'allow_all';
 }
 
 export interface VertexAIResponse {
-  predictions: {
-    bytesBase64Encoded: string;
-    mimeType: string;
-  }[];
+    predictions: {
+        bytesBase64Encoded: string;
+        mimeType: string;
+    }[];
 }
 
-// For Batch Stock Photo Job
-export type BatchJobStatus = 'PENDING' | 'GENERATING_CONCEPTS' | 'PROCESSING_IMAGES' | 'COMPLETED' | 'FAILED';
-export interface BatchJobResult {
-  prompt: string;
-  src: string;
+
+// For Batch Stock Photo Generation
+export interface BatchImageResult {
+    id: string; // Corresponds to the index/id from the initial prompt list
+    prompt: string;
+    status: 'pending' | 'generating' | 'complete' | 'failed';
+    src?: string; // base64 data URL
+    error?: string;
 }
+
 export interface BatchJob {
     id: string;
-    status: BatchJobStatus;
-    topic: string;
+    status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
     prompts: string[];
-    results: BatchJobResult[];
-    error?: string;
+    results: BatchImageResult[];
     createdAt: number;
-}
-
-// For Creative Director and Stock Photo assets
-export interface AssetMetadata {
-  title: string;
-  description: string;
-  tags: string[];
+    error?: string;
 }

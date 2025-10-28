@@ -1,243 +1,177 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { generatePhotoConcepts, generateStockImage } from '../services/geminiService';
-import type { BatchJob, BatchJobResult } from '../types';
-
+import { generateStockImage, startBatchImageJob, checkBatchImageJobStatus } from '../services/geminiService';
+import type { StockImageResult } from '../services/geminiService';
+import type { BatchJob } from '../types';
 import { SpinnerIcon } from './icons/SpinnerIcon';
 import { ArtDirectorIcon } from './icons/ArtDirectorIcon';
 import { SearchIcon } from './icons/SearchIcon';
-import { PhotoIcon } from './icons/PhotoIcon';
 
-type Mode = 'direct' | 'batch';
-const BATCH_POLLING_INTERVAL = 5000;
+type Mode = 'single' | 'batch';
+const BATCH_POLLING_INTERVAL = 5000; // 5 seconds
 
 const StockPhotoGenerator: React.FC = () => {
-    const [mode, setMode] = useState<Mode>('direct');
+    const [mode, setMode] = useState<Mode>('single');
 
-    return (
-        <div className="space-y-8">
-            <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                <div className="flex justify-center border-b border-slate-700 mb-6">
-                    <button onClick={() => setMode('direct')} className={`px-4 py-2 text-lg font-semibold transition-colors ${mode === 'direct' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400 hover:text-white'}`}>
-                        Art Direction
-                    </button>
-                    <button onClick={() => setMode('batch')} className={`px-4 py-2 text-lg font-semibold transition-colors ${mode === 'batch' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400 hover:text-white'}`}>
-                        Batch Generation
-                    </button>
-                </div>
-                {mode === 'direct' ? <ArtDirectionMode /> : <BatchGenerationMode />}
-            </div>
-        </div>
-    );
-};
+    // Single mode state
+    const [prompt, setPrompt] = useState('');
+    const [aspectRatio, setAspectRatio] = useState<'1:1' | '16:9' | '9:16'>('16:9');
+    const [singleResult, setSingleResult] = useState<StockImageResult | null>(null);
+    const [isSingleLoading, setIsSingleLoading] = useState(false);
+    const [singleError, setSingleError] = useState<string | null>(null);
 
-const ArtDirectionMode: React.FC = () => {
-    const [topic, setTopic] = useState('');
-    const [style, setStyle] = useState('Photorealistic');
-    const [palette, setPalette] = useState('');
-    const [angle, setAngle] = useState('Eye-level');
-    
-    const [concepts, setConcepts] = useState<string[]>([]);
-    const [selectedConcept, setSelectedConcept] = useState('');
-    const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-    
-    const [isLoadingConcepts, setIsLoadingConcepts] = useState(false);
-    const [isLoadingImage, setIsLoadingImage] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    // Batch mode state
+    const [batchTopic, setBatchTopic] = useState('');
+    const [batchCount, setBatchCount] = useState(4);
+    const [batchJob, setBatchJob] = useState<BatchJob | null>(null);
+    const [isBatchLoading, setIsBatchLoading] = useState(false);
+    const [batchError, setBatchError] = useState<string | null>(null);
+    const batchPollingRef = useRef<number | null>(null);
 
-    const handleGenerateConcepts = async () => {
-        setIsLoadingConcepts(true);
-        setError(null);
-        setConcepts([]);
-        setSelectedConcept('');
-        setGeneratedImage(null);
+    const handleGenerateSingle = async () => {
+        if (!prompt.trim()) return;
+        setIsSingleLoading(true);
+        setSingleError(null);
+        setSingleResult(null);
         try {
-            const result = await generatePhotoConcepts(topic, style, palette, angle);
-            setConcepts(result.concepts);
+            const result = await generateStockImage(prompt, aspectRatio, true);
+            setSingleResult(result);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to generate concepts.');
+            setSingleError(err instanceof Error ? err.message : 'An unknown error occurred.');
         } finally {
-            setIsLoadingConcepts(false);
+            setIsSingleLoading(false);
         }
     };
 
-    const handleGenerateImage = async () => {
-        if (!selectedConcept) return;
-        setIsLoadingImage(true);
-        setError(null);
-        setGeneratedImage(null);
+    const handleGenerateBatch = async () => {
+        if (!batchTopic.trim()) return;
+        setIsBatchLoading(true);
+        setBatchError(null);
+        setBatchJob(null);
+        if (batchPollingRef.current) clearInterval(batchPollingRef.current);
+
         try {
-            const result = await generateStockImage(selectedConcept, '16:9');
-            setGeneratedImage(result.src);
+            // In a real app, this prompt generation would be a separate Gemini call.
+            // For simplicity here, we generate simple prompts based on the topic.
+            const prompts = Array.from({ length: batchCount }, (_, i) => `${batchTopic}, high quality professional stock photo, style ${i + 1}`);
+
+            const { jobId } = await startBatchImageJob(prompts);
+            // Initialize job state for the UI
+            setBatchJob({ 
+                id: jobId, 
+                status: 'PENDING', 
+                prompts, 
+                results: prompts.map((p, i) => ({ id: `image-${i}`, prompt: p, status: 'pending' })),
+                createdAt: Date.now() 
+            });
+            batchPollingRef.current = window.setInterval(() => pollBatchStatus(jobId), BATCH_POLLING_INTERVAL);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to generate image.');
-        } finally {
-            setIsLoadingImage(false);
+            setBatchError(err instanceof Error ? err.message : 'Failed to start batch job.');
+            setIsBatchLoading(false);
         }
     };
 
-    const handleSelectConcept = (concept: string) => {
-        setSelectedConcept(concept);
-        setGeneratedImage(null);
-    }
-
-    return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="space-y-4">
-                <h3 className="text-xl font-bold text-slate-200">1. Define Art Direction</h3>
-                <Input label="Topic or Theme" value={topic} onChange={setTopic} placeholder="e.g., 'A tranquil Japanese zen garden'" />
-                <Select label="Style" value={style} onChange={setStyle} options={['Photorealistic', 'Cinematic', 'Minimalist', 'Vintage', 'Abstract']} />
-                <Input label="Color Palette (Optional)" value={palette} onChange={setPalette} placeholder="e.g., 'Earthy tones, muted greens, stone gray'" />
-                <Select label="Angle / Shot" value={angle} onChange={setAngle} options={['Eye-level', 'Low-angle', 'High-angle', 'Close-up', 'Wide shot']} />
-                <button onClick={handleGenerateConcepts} disabled={isLoadingConcepts || !topic} className="w-full flex justify-center items-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg">
-                    {isLoadingConcepts ? <SpinnerIcon /> : <><SearchIcon /> Generate Concepts</>}
-                </button>
-            </div>
-            <div className="space-y-4">
-                <h3 className="text-xl font-bold text-slate-200">2. Select Concept & Generate</h3>
-                <div className="space-y-2">
-                    {concepts.map((concept, i) => (
-                        <button key={i} onClick={() => handleSelectConcept(concept)} className={`w-full text-left p-2 rounded-md text-sm border-2 transition-colors ${selectedConcept === concept ? 'bg-cyan-900/50 border-cyan-500' : 'bg-slate-700/50 border-transparent hover:bg-slate-700'}`}>
-                            {concept}
-                        </button>
-                    ))}
-                </div>
-                {concepts.length > 0 && (
-                    <div className="sticky top-20 bg-slate-800 p-2 rounded-lg z-10">
-                         <textarea value={selectedConcept} onChange={e => setSelectedConcept(e.target.value)} className="w-full h-20 p-2 bg-slate-900/50 rounded-md text-sm" />
-                         <button onClick={handleGenerateImage} disabled={isLoadingImage || !selectedConcept} className="w-full flex justify-center items-center gap-2 bg-green-600 hover:bg-green-500 disabled:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg mt-2">
-                            {isLoadingImage ? <SpinnerIcon /> : <><PhotoIcon /> Generate Image</>}
-                        </button>
-                    </div>
-                )}
-            </div>
-             <div className="lg:col-span-2">
-                <h3 className="text-xl font-bold text-slate-200 mb-4 text-center">Result</h3>
-                <div className="w-full aspect-video bg-slate-900/50 rounded-lg flex items-center justify-center p-2">
-                    {isLoadingImage && <SpinnerIcon />}
-                    {error && <p className="text-red-400">{error}</p>}
-                    {generatedImage && <img src={generatedImage} alt="Generated stock" className="max-w-full max-h-full object-contain rounded-md" />}
-                    {!isLoadingImage && !error && !generatedImage && <p className="text-slate-500">Your generated image will appear here.</p>}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const BatchGenerationMode: React.FC = () => {
-    const [topic, setTopic] = useState('');
-    const [job, setJob] = useState<BatchJob | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const pollingRef = useRef<number | null>(null);
-
-    const cleanupPolling = () => {
-        if (pollingRef.current) {
-            clearInterval(pollingRef.current);
-            pollingRef.current = null;
+    const pollBatchStatus = async (jobId: string) => {
+        try {
+            const job = await checkBatchImageJobStatus(jobId);
+            setBatchJob(job);
+            if (job.status === 'COMPLETED' || job.status === 'FAILED') {
+                if (batchPollingRef.current) clearInterval(batchPollingRef.current);
+                setIsBatchLoading(false);
+                if (job.status === 'FAILED') {
+                    setBatchError(job.error || 'Batch job failed for an unknown reason.');
+                }
+            }
+        } catch (err) {
+            if (batchPollingRef.current) clearInterval(batchPollingRef.current);
+            setIsBatchLoading(false);
+            setBatchError(err instanceof Error ? err.message : 'Failed to poll job status.');
         }
     };
 
     useEffect(() => {
-        return cleanupPolling;
+        return () => {
+            if (batchPollingRef.current) clearInterval(batchPollingRef.current);
+        };
     }, []);
-    
-    const pollJobStatus = async (jobId: string) => {
-        try {
-            const response = await fetch(`/api/get-batch-status?jobId=${jobId}`);
-            if (!response.ok) throw new Error("Failed to get job status.");
-            const data = await response.json();
-            setJob(data.job);
 
-            if (data.job.status === 'COMPLETED' || data.job.status === 'FAILED') {
-                cleanupPolling();
-                setIsLoading(false);
-                if (data.job.status === 'FAILED') setError(data.job.error || 'Job failed for an unknown reason.');
-            }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Polling failed.');
-            cleanupPolling();
-            setIsLoading(false);
-        }
-    };
-
-    const handleStartBatch = async () => {
-        setIsLoading(true);
-        setError(null);
-        setJob(null);
-        cleanupPolling();
-        try {
-            const response = await fetch('/api/start-batch-job', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ topic }),
-            });
-            if (!response.ok) {
-                const errData = await response.json();
-                throw new Error(errData.message || "Failed to start batch job.");
-            }
-            const { jobId } = await response.json();
-            pollingRef.current = window.setInterval(() => pollJobStatus(jobId), BATCH_POLLING_INTERVAL);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
-            setIsLoading(false);
-        }
-    };
-    
-    return (
-        <div className="space-y-6">
-            <div>
-                 <Input label="Describe the topic for your content batch:" value={topic} onChange={setTopic} placeholder="e.g., 'Healthy and vibrant breakfast foods', 'Team collaboration in a modern office'" />
-                 <button onClick={handleStartBatch} disabled={isLoading || !topic} className="mt-4 w-full max-w-sm mx-auto flex justify-center items-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg">
-                    {isLoading ? <SpinnerIcon /> : '✨ Research & Generate Batch'}
-                </button>
+    const renderBatchResults = () => {
+        if (!batchJob) return <p className="text-slate-500 text-center">Batch generation results will appear here.</p>;
+        
+        return (
+             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {batchJob.results.map(item => (
+                    <div key={item.id} className="aspect-video bg-slate-900/50 rounded-lg flex items-center justify-center p-2 relative overflow-hidden">
+                        {item.status === 'complete' && item.src && <img src={item.src} alt={item.prompt} className="w-full h-full object-cover" />}
+                        {(item.status === 'pending' || item.status === 'generating') && <SpinnerIcon />}
+                        {item.status === 'failed' && <p className="text-red-400 text-xs text-center" title={item.error}>Failed</p>}
+                    </div>
+                ))}
             </div>
-            
-            {error && <p className="text-center text-red-400 bg-red-900/20 p-3 rounded-lg">{error}</p>}
+        )
+    }
 
-            {job && <BatchProgress job={job} />}
+    return (
+        <div className="space-y-8">
+            <div className="flex justify-center bg-slate-800/50 p-1 rounded-full max-w-sm mx-auto">
+                <button onClick={() => setMode('single')} className={`w-1/2 py-2 rounded-full font-semibold transition-colors ${mode === 'single' ? 'bg-cyan-500 text-white' : 'hover:bg-slate-700'}`}>Art Director</button>
+                <button onClick={() => setMode('batch')} className={`w-1/2 py-2 rounded-full font-semibold transition-colors ${mode === 'batch' ? 'bg-cyan-500 text-white' : 'hover:bg-slate-700'}`}>Batch Generation</button>
+            </div>
+
+            {mode === 'single' && (
+                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
+                    <h2 className="text-2xl font-bold text-cyan-400 mb-4">Art Director Mode</h2>
+                    <p className="text-slate-400 mb-4">Provide a detailed prompt for precise image generation.</p>
+                    <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="e.g., A cinematic, photorealistic shot of a lone astronaut looking at a swirling nebula, high-resolution, detailed suit..." className="w-full h-24 p-3 bg-slate-700/50 border border-slate-600 rounded-lg"/>
+                    <div className="flex items-center gap-4 my-4">
+                        <label className="text-slate-300">Aspect Ratio:</label>
+                        <select value={aspectRatio} onChange={e => setAspectRatio(e.target.value as any)} className="bg-slate-700/50 border border-slate-600 p-2 rounded-lg">
+                            <option value="16:9">16:9 (Landscape)</option>
+                            <option value="9:16">9:16 (Portrait)</option>
+                            <option value="1:1">1:1 (Square)</option>
+                        </select>
+                    </div>
+                    <button onClick={handleGenerateSingle} disabled={isSingleLoading || !prompt.trim()} className="w-full flex items-center justify-center bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg">
+                        {isSingleLoading ? <SpinnerIcon /> : <><ArtDirectorIcon /> <span className="ml-2">Generate Image</span></>}
+                    </button>
+                    {singleError && <p className="text-red-400 mt-4 text-center">{singleError}</p>}
+                    {singleResult && (
+                        <div className="mt-6">
+                            <h3 className="text-xl font-bold mb-4">Result:</h3>
+                            <img src={singleResult.src} alt={prompt} className="rounded-lg w-full" />
+                            {singleResult.metadata && (
+                                <div className="mt-4 p-4 bg-slate-900/50 rounded-lg">
+                                    <h4 className="font-semibold text-slate-200">Generated Metadata:</h4>
+                                    <p><strong>Title:</strong> {singleResult.metadata.title}</p>
+                                    <p><strong>Description:</strong> {singleResult.metadata.description}</p>
+                                    <p><strong>Tags:</strong> {singleResult.metadata.tags.join(', ')}</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+
+             {mode === 'batch' && (
+                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg space-y-4">
+                    <h2 className="text-2xl font-bold text-cyan-400">Batch Generation Mode</h2>
+                    <p className="text-slate-400">Provide a topic, and the AI will generate a series of images.</p>
+                    <input type="text" value={batchTopic} onChange={e => setBatchTopic(e.target.value)} placeholder="e.g., 'Minimalist home office setups'" className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg" />
+                    <div>
+                        <label htmlFor="batch-count" className="text-slate-300">Number of Images:</label>
+                        <input id="batch-count" type="number" value={batchCount} onChange={e => setBatchCount(Number(e.target.value))} min="2" max="8" className="w-full p-2 bg-slate-700/50 border border-slate-600 rounded-lg mt-1" />
+                    </div>
+                    <button onClick={handleGenerateBatch} disabled={isBatchLoading || !batchTopic.trim()} className="w-full flex items-center justify-center bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg">
+                        {isBatchLoading ? <SpinnerIcon /> : <><SearchIcon /> <span className="ml-2">Start Batch Job</span></>}
+                    </button>
+                    {batchError && <p className="text-red-400 mt-4 text-center">{batchError}</p>}
+                    <div className="mt-6">
+                        <h3 className="text-xl font-bold mb-4">Batch Results: {batchJob?.status}</h3>
+                        {renderBatchResults()}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
-
-const BatchProgress: React.FC<{ job: BatchJob }> = ({ job }) => (
-    <div className="space-y-4">
-        <div className="text-center">
-            <p className="font-semibold text-lg">Job Status: <span className="text-cyan-400 capitalize">{job.status.replace(/_/g, ' ')}</span></p>
-            {job.status === 'PROCESSING_IMAGES' && (
-                <p className="text-slate-400">{job.results.length} of {job.prompts.length} images generated.</p>
-            )}
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            {job.results.map((result, i) => (
-                <div key={i} className="aspect-video bg-slate-700 rounded-lg overflow-hidden">
-                    <img src={result.src} alt={result.prompt} className="w-full h-full object-cover" />
-                </div>
-            ))}
-            {Array.from({ length: job.prompts.length - job.results.length }).map((_, i) => (
-                 <div key={i} className="aspect-video bg-slate-900/50 rounded-lg flex items-center justify-center">
-                     <SpinnerIcon />
-                </div>
-            ))}
-        </div>
-    </div>
-);
-
-
-const Input: React.FC<{ label: string; value: string; onChange: (val: string) => void; placeholder?: string }> = ({ label, value, onChange, placeholder }) => (
-    <div>
-        <label className="block text-sm font-medium text-slate-300 mb-1">{label}</label>
-        <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className="w-full p-2 bg-slate-700/50 border border-slate-600 rounded-md" />
-    </div>
-);
-
-const Select: React.FC<{ label: string; value: string; onChange: (val: string) => void; options: string[] }> = ({ label, value, onChange, options }) => (
-     <div>
-        <label className="block text-sm font-medium text-slate-300 mb-1">{label}</label>
-        <select value={value} onChange={e => onChange(e.target.value)} className="w-full p-2 bg-slate-700/50 border border-slate-600 rounded-md">
-            {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-        </select>
-    </div>
-);
-
 
 export default StockPhotoGenerator;

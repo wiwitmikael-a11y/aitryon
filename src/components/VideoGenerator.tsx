@@ -1,25 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  generateVideo,
-  checkVideoOperationStatus,
-  fetchAndCreateVideoUrl,
-} from '../services/geminiService';
+import { generateVideo, checkVideoOperationStatus, fetchAndCreateVideoUrl } from '../services/geminiService';
+import ImageUploader from './ImageUploader';
 import { SpinnerIcon } from './icons/SpinnerIcon';
 import { VideoIcon } from './icons/VideoIcon';
-import ImageUploader from './ImageUploader';
-
-// Fix: Define a named interface `AIStudio` to resolve type conflicts
-// for the global `window.aistudio` object.
-interface AIStudio {
-  hasSelectedApiKey: () => Promise<boolean>;
-  openSelectKey: () => Promise<void>;
-}
-
-declare global {
-  interface Window {
-    aistudio: AIStudio;
-  }
-}
+import { VideoGeneratorIcon } from './icons/VideoGeneratorIcon';
 
 const POLLING_INTERVAL = 10000; // 10 seconds
 
@@ -27,165 +11,142 @@ const VideoGenerator: React.FC = () => {
     const [prompt, setPrompt] = useState('');
     const [image, setImage] = useState<string | null>(null);
     const [videoSrc, setVideoSrc] = useState<string | null>(null);
-    
     const [isLoading, setIsLoading] = useState(false);
-    const [loadingMessage, setLoadingMessage] = useState('Generating video...');
+    const [loadingMessage, setLoadingMessage] = useState('Starting video generation...');
     const [error, setError] = useState<string | null>(null);
-    
     const [operationName, setOperationName] = useState<string | null>(null);
-    const [apiKeySelected, setApiKeySelected] = useState(false);
 
     const pollingRef = useRef<number | null>(null);
 
-    const checkApiKey = async () => {
-        if (window.aistudio) {
-            const hasKey = await window.aistudio.hasSelectedApiKey();
-            setApiKeySelected(hasKey);
-        } else {
-            // Assume key is available if aistudio context is not present (e.g., local dev)
-            setApiKeySelected(true);
-        }
-    };
+    const loadingMessages = [
+        "Initializing hyper-dimensional film reels...",
+        "Syncing with the cinematic universe...",
+        "Teaching AI about the rule of thirds...",
+        "Rendering pixel-perfect popcorn...",
+        "This is taking a bit longer than expected. Hang tight!",
+        "Finalizing the director's cut...",
+    ];
 
     useEffect(() => {
-        checkApiKey();
-    }, []);
-
-    const cleanupPolling = () => {
-        if (pollingRef.current) {
-            clearInterval(pollingRef.current);
-            pollingRef.current = null;
+        let messageInterval: number;
+        if (isLoading) {
+            let i = 0;
+            messageInterval = window.setInterval(() => {
+                i = (i + 1) % loadingMessages.length;
+                setLoadingMessage(loadingMessages[i]);
+            }, 5000);
         }
-    };
+        return () => {
+            if (messageInterval) clearInterval(messageInterval);
+        };
+    }, [isLoading, loadingMessages]);
 
-    useEffect(() => {
-        return cleanupPolling;
-    }, []);
 
-    const pollOperationStatus = async (opName: string) => {
-        setLoadingMessage('Checking video status...');
+    const pollStatus = async (opName: string) => {
         try {
             const operation = await checkVideoOperationStatus(opName);
             if (operation.done) {
-                cleanupPolling();
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                setOperationName(null);
+                
                 if (operation.error) {
-                    throw new Error(operation.error.message);
+                    throw new Error(operation.error.message || 'Operation failed in backend.');
                 }
                 const uri = operation.response?.generatedVideos?.[0]?.video?.uri;
                 if (!uri) throw new Error("Video URI not found in operation response.");
-                
-                setLoadingMessage('Fetching video...');
-                const url = await fetchAndCreateVideoUrl(uri);
-                setVideoSrc(url);
+
+                setLoadingMessage("Fetching final video...");
+                const src = await fetchAndCreateVideoUrl(uri);
+                setVideoSrc(src);
                 setIsLoading(false);
-                setOperationName(null);
             }
         } catch (err) {
-            cleanupPolling();
+            if (pollingRef.current) clearInterval(pollingRef.current);
+            setOperationName(null);
             setIsLoading(false);
-            const message = err instanceof Error ? err.message : 'Polling for video status failed.';
-            setError(message);
-             if (message.includes('Requested entity was not found')) {
-                setError("API Key error. Please re-select your API key and try again.");
-                setApiKeySelected(false);
-            }
+            setError(err instanceof Error ? err.message : 'Failed to poll for video status.');
         }
     };
+    
+    useEffect(() => {
+        if (operationName) {
+            pollingRef.current = window.setInterval(() => {
+                pollStatus(operationName)
+            }, POLLING_INTERVAL);
+        }
+        return () => {
+            if (pollingRef.current) clearInterval(pollingRef.current);
+        };
+    }, [operationName]);
 
     const handleGenerate = async () => {
-        if (!prompt.trim() && !image) {
-            setError('Please provide a prompt or an image.');
+        if (!prompt.trim()) {
+            setError('Please enter a prompt.');
             return;
         }
-
-        await checkApiKey();
-        if (!apiKeySelected) {
-            setError("Please select an API key before generating a video.");
-            return;
-        }
-
         setIsLoading(true);
-        setLoadingMessage('Starting video generation...');
         setError(null);
         setVideoSrc(null);
-        cleanupPolling();
+        setLoadingMessage('Starting video generation...');
+        if (pollingRef.current) clearInterval(pollingRef.current);
 
         try {
-            let imagePayload: { imageBytes: string, mimeType: string } | undefined = undefined;
+            let imagePayload;
             if (image) {
-                const match = image.match(/^data:(.+);base64,(.+)$/);
-                if (match) {
-                    imagePayload = { mimeType: match[1], imageBytes: match[2] };
-                }
+                const [header, base64Data] = image.split(',');
+                const mimeType = header.match(/:(.*?);/)?.[1] || 'image/png';
+                imagePayload = { imageBytes: base64Data, mimeType };
             }
 
-            const op = await generateVideo(prompt, imagePayload);
-            if (op.name) {
-                setOperationName(op.name);
-                pollingRef.current = window.setInterval(() => pollOperationStatus(op.name), POLLING_INTERVAL);
-            } else {
-                throw new Error("Did not receive a valid operation name to track.");
-            }
+            const operation = await generateVideo(prompt, imagePayload);
+            if (!operation.name) throw new Error("Video operation name not found.");
+            
+            setOperationName(operation.name);
+            setLoadingMessage('Video generation in progress...');
+
         } catch (err) {
             setIsLoading(false);
-            const message = err instanceof Error ? err.message : 'Failed to start video generation.';
-            setError(message);
-            if (message.includes('Requested entity was not found')) {
-                setError("API Key error. Please re-select your API key and try again.");
-                setApiKeySelected(false);
-            }
+            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
         }
     };
-
-    const handleSelectKey = async () => {
-        if (window.aistudio) {
-            await window.aistudio.openSelectKey();
-            // Assume success and optimistically update UI
-            setApiKeySelected(true);
-            setError(null);
-        }
-    };
+    
+    const canGenerate = prompt.trim() && !isLoading;
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6">
-                <h2 className="text-2xl font-bold text-cyan-400">Video Prompt</h2>
-                {!apiKeySelected && (
-                    <div className="bg-yellow-900/30 p-4 rounded-lg text-center">
-                        <p className="text-yellow-300 mb-2">An API key is required for video generation.</p>
-                        <button onClick={handleSelectKey} className="bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-bold py-2 px-4 rounded-md">
-                            Select API Key
-                        </button>
-                        <p className="text-xs text-slate-400 mt-2">
-                           Video generation with Veo is a paid feature. Please review the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline hover:text-cyan-400">billing documentation</a>.
-                        </p>
+        <div className="space-y-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6">
+                    <h2 className="text-2xl font-bold text-cyan-400">Video Prompt</h2>
+                    <div>
+                        <label className="block text-slate-300 font-semibold mb-2">Describe the video you want to create:</label>
+                        <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="e.g., 'A majestic eagle soaring over a misty mountain range at sunrise, cinematic, 4k.'" className="w-full h-32 p-3 bg-slate-700/50 border border-slate-600 rounded-lg"/>
                     </div>
-                )}
-                <div className="space-y-4">
-                    <textarea
-                        value={prompt}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        placeholder="e.g., 'A majestic whale breaching the ocean surface in slow motion, sunset lighting'"
-                        className="w-full h-24 p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    />
-                    <ImageUploader label="Starting Image (Optional)" onImageUpload={setImage} initialImage={image} />
+                    <div>
+                        <ImageUploader label="Optional: Starting Image" onImageUpload={base64 => setImage(base64)} initialImage={image} />
+                    </div>
+                     <button onClick={handleGenerate} disabled={!canGenerate} className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-bold py-4 px-8 rounded-full text-lg shadow-lg flex items-center justify-center gap-2">
+                        {isLoading ? 'Generating...' : <> <VideoGeneratorIcon /> Generate Video </>}
+                    </button>
                 </div>
-                <button onClick={handleGenerate} disabled={isLoading || !apiKeySelected} className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg shadow-lg">
-                    {isLoading ? 'Generating...' : '✨ Create Video'}
-                </button>
-            </div>
-            <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                <h2 className="text-2xl font-bold text-cyan-400 mb-6">Generated Video</h2>
-                <div className="w-full aspect-video bg-slate-900/50 rounded-lg flex items-center justify-center p-2">
+                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg flex items-center justify-center min-h-[400px]">
                     {isLoading && (
                         <div className="text-center">
                             <SpinnerIcon />
-                            <p className="mt-4 text-slate-400">{loadingMessage}</p>
-                            <p className="text-sm text-slate-500">Video generation can take several minutes.</p>
+                            <p className="text-slate-300 mt-4 text-lg">Generating Video</p>
+                            <p className="text-slate-400 mt-2 text-sm">{loadingMessage}</p>
                         </div>
                     )}
-                    {error && <p className="text-red-400 p-4 text-center">{error}</p>}
-                    {videoSrc && <video src={videoSrc} controls autoPlay loop className="max-w-full max-h-full object-contain rounded-md" />}
+                    {error && (
+                        <div className="text-center bg-red-900/20 p-4 rounded-lg">
+                            <p className="text-red-400 font-semibold">An Error Occurred</p>
+                            <p className="text-slate-300 mt-2 text-sm">{error}</p>
+                        </div>
+                    )}
+                    {videoSrc && (
+                        <div className="w-full">
+                             <video src={videoSrc} controls autoPlay loop className="w-full rounded-lg shadow-2xl" />
+                        </div>
+                    )}
                     {!isLoading && !error && !videoSrc && (
                         <div className="text-center text-slate-500">
                             <VideoIcon />
