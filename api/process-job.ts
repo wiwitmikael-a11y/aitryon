@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db } from './lib/db';
 import { getGoogleAuthToken } from './lib/google-auth';
 import { API_ENDPOINT } from '../src/constants';
-import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse } from '../src/types';
+import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse, Job } from '../src/types';
 
 // Helper to remove the data URL prefix if it exists
 const getBase64Data = (dataUrl: string): string => {
@@ -31,13 +31,14 @@ export default async function handler(
   res.status(202).end();
 
   try {
-    const job = await db.get(jobId);
+    // FIX: Use generic type argument for db.get
+    const job = await db.get<Job>(jobId);
     if (!job) {
       console.error(`Job not found: ${jobId}`);
       return;
     }
 
-    await db.update(jobId, { status: 'PROCESSING' });
+    await db.update<Job>(jobId, { status: 'PROCESSING' });
 
     const authToken = await getGoogleAuthToken();
     
@@ -92,11 +93,11 @@ export default async function handler(
     const firstPrediction = data.predictions[0];
     const resultImage = `data:${firstPrediction.mimeType};base64,${firstPrediction.bytesBase64Encoded}`;
     
-    await db.update(jobId, { status: 'COMPLETED', resultImage });
+    await db.update<Job>(jobId, { status: 'COMPLETED', resultImage });
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'An unknown processing error occurred.';
     console.error(`Error processing job ${jobId}:`, error);
-    await db.update(jobId, { status: 'FAILED', error: errorMessage });
+    await db.update<Job>(jobId, { status: 'FAILED', error: errorMessage });
   }
 }

@@ -1,22 +1,20 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import {
-    generateVideo,
-    checkVideoOperationStatus,
-    fetchAndCreateVideoUrl
+  generateVideo,
+  checkVideoOperationStatus,
+  fetchAndCreateVideoUrl,
 } from '../services/geminiService';
-import ImageUploader from './ImageUploader';
 import { SpinnerIcon } from './icons/SpinnerIcon';
 import { VideoIcon } from './icons/VideoIcon';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import ImageUploader from './ImageUploader';
 
-type Stage = 'idle' | 'generating' | 'polling' | 'complete' | 'failed';
-
-interface VideoHistoryItem {
-    id: string;
-    src: string;
-    prompt: string;
-    image?: string | null;
+declare global {
+  interface Window {
+    aistudio: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
+  }
 }
 
 const POLLING_INTERVAL = 10000; // 10 seconds
@@ -24,207 +22,173 @@ const POLLING_INTERVAL = 10000; // 10 seconds
 const VideoGenerator: React.FC = () => {
     const [prompt, setPrompt] = useState('');
     const [image, setImage] = useState<string | null>(null);
-    const [stage, setStage] = useState<Stage>('idle');
+    const [videoSrc, setVideoSrc] = useState<string | null>(null);
+    
+    const [isLoading, setIsLoading] = useState(false);
+    const [loadingMessage, setLoadingMessage] = useState('Generating video...');
     const [error, setError] = useState<string | null>(null);
-    const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
-    const [progressMessage, setProgressMessage] = useState('');
-    const [history, setHistory] = useLocalStorage<VideoHistoryItem[]>('video-generator-history', []);
+    
+    const [operationName, setOperationName] = useState<string | null>(null);
+    const [apiKeySelected, setApiKeySelected] = useState(false);
 
     const pollingRef = useRef<number | null>(null);
 
-    // Cleanup polling interval on unmount
+    const checkApiKey = async () => {
+        if (window.aistudio) {
+            const hasKey = await window.aistudio.hasSelectedApiKey();
+            setApiKeySelected(hasKey);
+        } else {
+            // Assume key is available if aistudio context is not present (e.g., local dev)
+            setApiKeySelected(true);
+        }
+    };
+
     useEffect(() => {
-        return () => {
-            if (pollingRef.current) {
-                clearInterval(pollingRef.current);
-            }
-        };
+        checkApiKey();
     }, []);
 
-    const resetGenerationState = () => {
-        setStage('idle');
-        setError(null);
-        setGeneratedVideoUrl(null);
-        setProgressMessage('');
+    const cleanupPolling = () => {
         if (pollingRef.current) {
             clearInterval(pollingRef.current);
             pollingRef.current = null;
         }
     };
 
+    useEffect(() => {
+        return cleanupPolling;
+    }, []);
+
+    const pollOperationStatus = async (opName: string) => {
+        setLoadingMessage('Checking video status...');
+        try {
+            const operation = await checkVideoOperationStatus(opName);
+            if (operation.done) {
+                cleanupPolling();
+                if (operation.error) {
+                    throw new Error(operation.error.message);
+                }
+                const uri = operation.response?.generatedVideos?.[0]?.video?.uri;
+                if (!uri) throw new Error("Video URI not found in operation response.");
+                
+                setLoadingMessage('Fetching video...');
+                const url = await fetchAndCreateVideoUrl(uri);
+                setVideoSrc(url);
+                setIsLoading(false);
+                setOperationName(null);
+            }
+        } catch (err) {
+            cleanupPolling();
+            setIsLoading(false);
+            const message = err instanceof Error ? err.message : 'Polling for video status failed.';
+            setError(message);
+             if (message.includes('Requested entity was not found')) {
+                setError("API Key error. Please re-select your API key and try again.");
+                setApiKeySelected(false);
+            }
+        }
+    };
+
     const handleGenerate = async () => {
         if (!prompt.trim() && !image) {
-            setError('Please provide a text prompt or an image.');
+            setError('Please provide a prompt or an image.');
             return;
         }
 
-        resetGenerationState();
-        setStage('generating');
+        await checkApiKey();
+        if (!apiKeySelected) {
+            setError("Please select an API key before generating a video.");
+            return;
+        }
+
+        setIsLoading(true);
+        setLoadingMessage('Starting video generation...');
         setError(null);
-        setProgressMessage('Submitting video generation job...');
+        setVideoSrc(null);
+        cleanupPolling();
 
         try {
-            let imagePayload;
+            let imagePayload: { imageBytes: string, mimeType: string } | undefined = undefined;
             if (image) {
-                const [header, base64Data] = image.split(',');
-                const mimeType = header.match(/:(.*?);/)?.[1] || 'image/png';
-                imagePayload = { imageBytes: base64Data, mimeType };
+                const match = image.match(/^data:(.+);base64,(.+)$/);
+                if (match) {
+                    imagePayload = { mimeType: match[1], imageBytes: match[2] };
+                }
             }
 
-            const operation = await generateVideo(prompt, imagePayload);
-            if (!operation || !operation.name) {
-                throw new Error("Failed to start video generation job. No operation name returned.");
+            const op = await generateVideo(prompt, imagePayload);
+            if (op.name) {
+                setOperationName(op.name);
+                pollingRef.current = window.setInterval(() => pollOperationStatus(op.name), POLLING_INTERVAL);
+            } else {
+                throw new Error("Did not receive a valid operation name to track.");
             }
-
-            setStage('polling');
-            setProgressMessage('Video is generating... This can take a few minutes.');
-            startPolling(operation.name);
-
         } catch (err) {
-            const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+            setIsLoading(false);
+            const message = err instanceof Error ? err.message : 'Failed to start video generation.';
             setError(message);
-            setStage('failed');
+            if (message.includes('Requested entity was not found')) {
+                setError("API Key error. Please re-select your API key and try again.");
+                setApiKeySelected(false);
+            }
         }
     };
 
-    const startPolling = (operationName: string) => {
-        pollingRef.current = window.setInterval(async () => {
-            try {
-                const operation = await checkVideoOperationStatus(operationName);
-                if (operation.done) {
-                    if (pollingRef.current) clearInterval(pollingRef.current);
-                    
-                    if (operation.error) {
-                        throw new Error(operation.error.message || 'Operation failed with an error.');
-                    }
-
-                    const uri = operation.response?.generatedVideos?.[0]?.video?.uri;
-                    if (!uri) {
-                        throw new Error("Video URI not found in operation response.");
-                    }
-
-                    setProgressMessage('Processing completed video...');
-                    const videoUrl = await fetchAndCreateVideoUrl(uri);
-                    
-                    setGeneratedVideoUrl(videoUrl);
-                    setStage('complete');
-                    
-                    const newHistoryItem: VideoHistoryItem = {
-                        id: operationName,
-                        src: videoUrl,
-                        prompt,
-                        image
-                    };
-                    // FIX: Avoid functional update form due to custom hook typing. Read from localStorage to get latest history.
-                    const currentHistory: VideoHistoryItem[] = JSON.parse(localStorage.getItem('video-generator-history') || '[]');
-                    setHistory([newHistoryItem, ...currentHistory.filter(item => item.id !== newHistoryItem.id)]);
-                }
-            } catch (err) {
-                if (pollingRef.current) clearInterval(pollingRef.current);
-                const message = err instanceof Error ? err.message : 'Polling for video status failed.';
-                setError(message);
-                setStage('failed');
-            }
-        }, POLLING_INTERVAL);
-    };
-    
-    const handleReuse = (item: VideoHistoryItem) => {
-        setPrompt(item.prompt);
-        setImage(item.image || null);
-        setGeneratedVideoUrl(item.src);
-        setStage('complete');
-        setError(null);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+    const handleSelectKey = async () => {
+        if (window.aistudio) {
+            await window.aistudio.openSelectKey();
+            // Assume success and optimistically update UI
+            setApiKeySelected(true);
+            setError(null);
+        }
     };
 
-    const isLoading = stage === 'generating' || stage === 'polling';
-    
     return (
-        <div className="space-y-8">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg space-y-6">
-                    <h2 className="text-2xl font-bold text-cyan-400">Video Prompt</h2>
-                    <div>
-                        <label htmlFor="prompt" className="block text-slate-300 font-semibold mb-2">Describe your video:</label>
-                        <textarea
-                            id="prompt"
-                            value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
-                            placeholder="e.g., 'A neon hologram of a cat driving a sports car at top speed on a rainy night in Tokyo'"
-                            className="w-full h-32 p-3 bg-slate-700/50 border border-slate-600 rounded-lg"
-                            disabled={isLoading}
-                        />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6">
+                <h2 className="text-2xl font-bold text-cyan-400">Video Prompt</h2>
+                {!apiKeySelected && (
+                    <div className="bg-yellow-900/30 p-4 rounded-lg text-center">
+                        <p className="text-yellow-300 mb-2">An API key is required for video generation.</p>
+                        <button onClick={handleSelectKey} className="bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-bold py-2 px-4 rounded-md">
+                            Select API Key
+                        </button>
+                        <p className="text-xs text-slate-400 mt-2">
+                           Video generation with Veo is a paid feature. Please review the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline hover:text-cyan-400">billing documentation</a>.
+                        </p>
                     </div>
-                    <ImageUploader 
-                        label="Add a Starting Image (Optional)"
-                        onImageUpload={(base64) => setImage(base64)}
-                        initialImage={image}
+                )}
+                <div className="space-y-4">
+                    <textarea
+                        value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        placeholder="e.g., 'A majestic whale breaching the ocean surface in slow motion, sunset lighting'"
+                        className="w-full h-24 p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500"
                     />
-                    <button
-                        onClick={handleGenerate}
-                        disabled={isLoading || (!prompt.trim() && !image)}
-                        className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg flex items-center justify-center gap-2"
-                    >
-                        {isLoading ? <SpinnerIcon /> : 'Generate Video'}
-                    </button>
+                    <ImageUploader label="Starting Image (Optional)" onImageUpload={setImage} initialImage={image} />
                 </div>
-
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg min-h-[400px] flex flex-col justify-center items-center">
-                    <h2 className="text-2xl font-bold text-cyan-400 mb-6 text-center">Generated Video</h2>
-                    
-                    {stage === 'idle' && (
+                <button onClick={handleGenerate} disabled={isLoading || !apiKeySelected} className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg shadow-lg">
+                    {isLoading ? 'Generating...' : '✨ Create Video'}
+                </button>
+            </div>
+            <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
+                <h2 className="text-2xl font-bold text-cyan-400 mb-6">Generated Video</h2>
+                <div className="w-full aspect-video bg-slate-900/50 rounded-lg flex items-center justify-center p-2">
+                    {isLoading && (
+                        <div className="text-center">
+                            <SpinnerIcon />
+                            <p className="mt-4 text-slate-400">{loadingMessage}</p>
+                            <p className="text-sm text-slate-500">Video generation can take several minutes.</p>
+                        </div>
+                    )}
+                    {error && <p className="text-red-400 p-4 text-center">{error}</p>}
+                    {videoSrc && <video src={videoSrc} controls autoPlay loop className="max-w-full max-h-full object-contain rounded-md" />}
+                    {!isLoading && !error && !videoSrc && (
                         <div className="text-center text-slate-500">
                             <VideoIcon />
                             <p className="mt-4">Your generated video will appear here.</p>
                         </div>
                     )}
-
-                    {(stage === 'generating' || stage === 'polling') && (
-                        <div className="text-center text-slate-400">
-                            <SpinnerIcon />
-                            <p className="mt-4 text-lg font-semibold">{progressMessage}</p>
-                            <p className="text-sm text-slate-500">Please be patient, video generation can take several minutes.</p>
-                        </div>
-                    )}
-                    
-                    {stage === 'failed' && error && (
-                        <div className="text-center bg-red-900/20 p-4 rounded-lg">
-                            <p className="text-red-400 font-semibold">Generation Failed</p>
-                            <p className="text-slate-300 mt-2 text-sm break-words">{error}</p>
-                        </div>
-                    )}
-
-                    {stage === 'complete' && generatedVideoUrl && (
-                        <div className="w-full">
-                            <video src={generatedVideoUrl} controls autoPlay loop className="w-full rounded-lg shadow-2xl" />
-                            <div className="flex justify-center mt-4">
-                                <a href={generatedVideoUrl} download={`ai-video-${Date.now()}.mp4`} className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-full">
-                                    Download Video
-                                </a>
-                            </div>
-                        </div>
-                    )}
                 </div>
-            </div>
-
-            <div className="mt-12">
-                <h2 className="text-2xl font-bold text-cyan-400 mb-6 text-center lg:text-left">Video History</h2>
-                {history.length > 0 ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                        {history.map(item => (
-                            <div key={item.id} onClick={() => handleReuse(item)} className="group relative aspect-video bg-slate-800 rounded-lg overflow-hidden shadow-lg cursor-pointer">
-                                <video src={item.src} muted loop className="w-full h-full object-cover transition-transform group-hover:scale-105" />
-                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                    <p className="text-white font-bold">Reuse</p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    <p className="text-center text-slate-500 mt-6 bg-slate-800/50 py-8 rounded-lg">
-                        Your generated videos will appear here.
-                    </p>
-                )}
             </div>
         </div>
     );
