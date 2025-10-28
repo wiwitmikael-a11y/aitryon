@@ -1,20 +1,19 @@
 import React, { useState } from 'react';
 import Header from './components/Header';
-import Footer from './components/Footer';
+import Dashboard from './components/Dashboard';
 import VirtualTryOn from './components/VirtualTryOn';
 import StockPhotoGenerator from './components/StockPhotoGenerator';
 import VideoGenerator from './components/VideoGenerator';
 import CreativeDirector from './components/CreativeDirector';
-import Dashboard from './components/Dashboard';
+import Footer from './components/Footer';
 
-export type Tool = 'try-on' | 'stock-photo' | 'video-generator' | 'creative-director';
-type ActiveView = 'dashboard' | Tool;
+export type Tool = 'dashboard' | 'try-on' | 'stock-photo' | 'video-generator' | 'creative-director';
 
 function App() {
-  const [activeView, setActiveView] = useState<ActiveView>('dashboard');
+  const [activeTool, setActiveTool] = useState<Tool>('dashboard');
 
-  const renderActiveView = () => {
-    switch (activeView) {
+  const renderTool = () => {
+    switch (activeTool) {
       case 'try-on':
         return <VirtualTryOn />;
       case 'stock-photo':
@@ -25,18 +24,18 @@ function App() {
         return <CreativeDirector />;
       case 'dashboard':
       default:
-        return <Dashboard onSelectTool={setActiveView} />;
+        return <Dashboard onSelectTool={setActiveTool} />;
     }
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-900 text-slate-200 font-sans">
       <Header 
-        activeView={activeView} 
-        onBack={() => setActiveView('dashboard')} 
+        activeTool={activeTool}
+        onNavigateHome={() => setActiveTool('dashboard')} 
       />
       <main className="flex-grow container mx-auto p-4 md:p-8">
-        {renderActiveView()}
+        {renderTool()}
       </main>
       <Footer />
     </div>

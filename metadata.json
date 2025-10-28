@@ -1,5 +1,5 @@
 {
-  "name": "AI Virtual Try-On",
-  "description": "An application that allows users to virtually try on clothing. Upload an image of a person and a product image to generate a new image of the person wearing the item.",
+  "name": "AI Creative Suite",
+  "description": "An all-in-one platform for next-generation content creation, featuring Virtual Try-On, a Stock Photo Generator, a Video Generator, and a full Creative Director workflow.",
   "requestFramePermissions": []
 }
