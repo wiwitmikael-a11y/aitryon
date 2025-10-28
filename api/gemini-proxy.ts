@@ -9,22 +9,14 @@ import {
     ADVANCED_TEXT_MODEL,
 } from './lib/constants';
 
-// Re-defining this interface here to avoid path resolution issues on Vercel.
 interface AssetMetadata {
     title: string;
     description: string;
     tags: string[];
 }
 
-// Using a dedicated client for API_KEY based tasks (Gemini)
-// FIX: The GoogleGenAI constructor expects an object with an `apiKey` property.
 const geminiAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
-/**
- * A helper function to generate metadata for a given asset prompt.
- * @param payload The prompt and type of asset.
- * @returns A promise that resolves to the asset metadata.
- */
 async function handleGenerateMetadataForAsset(
     payload: { prompt: string; type: 'photo' | 'video' }
 ): Promise<AssetMetadata> {
@@ -57,18 +49,13 @@ Return the result as a JSON object with keys: "title", "description", and "tags"
         },
     });
     
-    // FIX: Add safety check for response text
-    const responseText = response.text;
+    const responseText = response.text ?? '';
     if (!responseText) {
         throw new Error('Failed to generate metadata: empty response from AI.');
     }
     return JSON.parse(responseText);
 }
 
-/**
- * The main Vercel serverless function handler.
- * It routes requests based on the 'task' property in the request body.
- */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
@@ -85,7 +72,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
 
                 const authToken = await getAuthToken();
-                const projectId = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON || '{}').project_id;
+                const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON || '{}');
+                const projectId = credentials.project_id;
                 if (!projectId) {
                     throw new Error('Project ID not found in credentials.');
                 }
@@ -126,17 +114,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     throw new Error(`Vertex AI API request failed with status ${response.status}: ${errorBody}`);
                 }
                 
-                // Response is a stream of JSON objects. We need to parse them.
                 const responseText = await response.text();
-                // Extract the base64 data from the last valid JSON part of the stream.
                 const jsonParts = responseText.match(/{[\s\S]*?}/g) || [];
                 const lastPart = jsonParts.length > 0 ? JSON.parse(jsonParts[jsonParts.length - 1]) : {};
+                const firstPart = lastPart?.candidates?.[0]?.content?.parts?.[0];
 
-                const firstPart = lastPart.candidates?.[0]?.content?.parts?.[0];
-
-                if (firstPart && 'inlineData' in firstPart && firstPart.inlineData) {
+                if (firstPart && 'inlineData' in firstPart && firstPart.inlineData?.data) {
                     const resultImageBase64 = firstPart.inlineData.data;
-                    const mimeType = firstPart.inlineData.mimeType;
+                    const mimeType = firstPart.inlineData.mimeType ?? 'image/png';
                     const resultImage = `data:${mimeType};base64,${resultImageBase64}`;
                     return res.status(200).json({ resultImage });
                 }
@@ -164,8 +149,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                 });
 
-                // FIX: Add safety check for response text
-                const responseText = response.text;
+                const responseText = response.text ?? '';
                 if (!responseText) {
                     throw new Error('Failed to generate creative strategy: empty response from AI.');
                 }
@@ -187,18 +171,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         numberOfImages: 1,
                         aspectRatio: aspectRatio,
                         outputMimeType: 'image/png',
-                        // FIX: Moved safetySettings into the config object to match the expected type.
+                        // FIX: `safetySettings` must be inside the `config` object.
                         safetySettings: [
                             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
                             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
                             { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
                             { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                        ]
+                        ],
                     },
                 });
                 
-                // FIX: Add safety check for generated images
-                const base64ImageBytes = imageResponse.generatedImages?.[0]?.image?.imageBytes;
+                const base64ImageBytes = imageResponse?.generatedImages?.[0]?.image?.imageBytes;
                 if (!base64ImageBytes) {
                     throw new Error('Image generation failed, no image bytes returned.');
                 }
@@ -232,8 +215,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                 });
                 
-                // FIX: Add safety check for theme response
-                const themeResponseText = themeResponse.text;
+                const themeResponseText = themeResponse.text ?? '';
                 if (!themeResponseText) {
                     throw new Error('Failed to generate photoshoot theme: empty response from AI.');
                 }
@@ -247,15 +229,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             numberOfImages: 1,
                             aspectRatio,
                             outputMimeType: 'image/png',
-                            // FIX: Moved safetySettings into the config object to match the expected type.
+                            // FIX: `safetySettings` must be inside the `config` object.
                             safetySettings: [
                                 { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
                                 { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
                                 { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
                                 { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                            ]
+                            ],
                         },
-                    }).catch(e => {
+                    }).catch((e) => {
                         console.error(`Image generation failed for prompt: "${prompt}"`, e);
                         return { error: true, prompt };
                     })
@@ -267,8 +249,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     if (result.error) {
                         return { id: `img-${i}`, prompt: result.prompt, src: null };
                     }
-                     // FIX: Add safety check for generated images
-                    const base64ImageBytes = result.generatedImages?.[0]?.image?.imageBytes;
+                    const base64ImageBytes = result?.generatedImages?.[0]?.image?.imageBytes;
                     return {
                         id: `img-${i}`,
                         prompt: prompts[i],
@@ -282,7 +263,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             case 'generateVideo': {
                 const { prompt, aspectRatio } = payload;
                 const authToken = await getAuthToken();
-                const projectId = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON || '{}').project_id;
+                const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON || '{}');
+                const projectId = credentials.project_id;
                 if (!projectId) {
                     throw new Error('Project ID not found in credentials.');
                 }
@@ -337,8 +319,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const { uri } = payload;
                 const authToken = await getAuthToken();
 
-                // Vertex AI video URIs are typically signed URLs and don't need an API key.
-                // They need the OAuth2 token for access.
                 const response = await fetch(uri, {
                     headers: { 'Authorization': `Bearer ${authToken}` }
                 });
@@ -370,8 +350,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     contents: prompt,
                 });
                 
-                // FIX: Add safety check for response text
-                const responseText = response.text;
+                const responseText = response.text ?? '';
                 if (!responseText) {
                     throw new Error('Failed to generate creative prompt: empty response from AI.');
                 }

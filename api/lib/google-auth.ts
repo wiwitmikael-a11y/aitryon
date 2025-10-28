@@ -35,9 +35,8 @@ export async function getAuthToken(): Promise<string> {
         const client = await auth.getClient();
         const tokenResponse = await client.getAccessToken();
 
-        // FIX: Add safety check for token response.
-        if (!tokenResponse.token) {
-            throw new Error("Failed to retrieve access token from Google Auth Library.");
+        if (!tokenResponse || !tokenResponse.token) {
+            throw new Error("Failed to retrieve access token from Google Auth Library; token response is invalid.");
         }
 
         authToken = tokenResponse.token;
