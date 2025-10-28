@@ -7,7 +7,7 @@ import {
     fetchAndCreateVideoUrl,
     generateMetadataForAsset
 } from '../services/geminiService';
-import type { AssetMetadata, GeneratedImage } from '../services/geminiService';
+import type { AssetMetadata } from '../services/geminiService';
 import { createContentPackageZip } from '../utils/zipUtils';
 
 import { SearchIcon } from './icons/SearchIcon';
@@ -97,12 +97,9 @@ const CreativeDirector: React.FC = () => {
     const processPhotoAsset = async (id: string, prompt: string) => {
         updateAssetState(id, { status: 'generating' });
         try {
-            // Fix: Pass correct arguments to generateStockImage and handle its object return type.
-            const [imageResult, metadata] = await Promise.all([
-                generateStockImage(prompt, '16:9', false),
-                generateMetadataForAsset(prompt, 'photo')
-            ]);
-            updateAssetState(id, { status: 'complete', src: imageResult.src, metadata });
+            // Fix: Call generateStockImage with metadata generation enabled and handle its object return type.
+            const imageResult = await generateStockImage(prompt, '16:9', true);
+            updateAssetState(id, { status: 'complete', src: imageResult.src, metadata: imageResult.metadata });
         } catch (err) {
             const error = err instanceof Error ? err.message : 'Generation failed.';
             updateAssetState(id, { status: 'failed', error });

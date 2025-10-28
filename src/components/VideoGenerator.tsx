@@ -1,223 +1,228 @@
-import React, { useState, useCallback } from 'react';
-import { generateAndExtendVideo, fetchAndCreateVideoUrl, researchAndSuggestVideoThemes, VideoTheme } from '../services/geminiService';
-import { SpinnerIcon } from './icons/SpinnerIcon';
-import { DownloadIcon } from './icons/DownloadIcon';
-import { VideoIcon } from './icons/VideoIcon';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+    generateVideo,
+    checkVideoOperationStatus,
+    fetchAndCreateVideoUrl
+} from '../services/geminiService';
 import ImageUploader from './ImageUploader';
-import { SearchIcon } from './icons/SearchIcon';
+import { SpinnerIcon } from './icons/SpinnerIcon';
+import { VideoIcon } from './icons/VideoIcon';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
-type Mode = 'manual' | 'auto';
-type ResearchStage = 'idle' | 'researching' | 'selection' | 'generating' | 'complete';
+type Stage = 'idle' | 'generating' | 'polling' | 'complete' | 'failed';
+
+interface VideoHistoryItem {
+    id: string;
+    src: string;
+    prompt: string;
+    image?: string | null;
+}
+
+const POLLING_INTERVAL = 10000; // 10 seconds
 
 const VideoGenerator: React.FC = () => {
-    const [mode, setMode] = useState<Mode>('manual');
-    
-    // Manual mode states
     const [prompt, setPrompt] = useState('');
-    const [referenceImage, setReferenceImage] = useState<string | null>(null);
-
-    // Auto mode states
-    const [researchStage, setResearchStage] = useState<ResearchStage>('idle');
-    const [themes, setThemes] = useState<VideoTheme[]>([]);
-    
-    // Shared states
-    const [isLoading, setIsLoading] = useState(false);
-    const [progressMessage, setProgressMessage] = useState('');
+    const [image, setImage] = useState<string | null>(null);
+    const [stage, setStage] = useState<Stage>('idle');
     const [error, setError] = useState<string | null>(null);
-    const [videoUrl, setVideoUrl] = useState<string | null>(null);
+    const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+    const [progressMessage, setProgressMessage] = useState('');
+    const [history, setHistory] = useLocalStorage<VideoHistoryItem[]>('video-generator-history', []);
 
-    const resetState = () => {
-        setIsLoading(false);
+    const pollingRef = useRef<number | null>(null);
+
+    // Cleanup polling interval on unmount
+    useEffect(() => {
+        return () => {
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+            }
+        };
+    }, []);
+
+    const resetGenerationState = () => {
+        setStage('idle');
         setError(null);
-        setVideoUrl(null);
+        setGeneratedVideoUrl(null);
         setProgressMessage('');
-        setPrompt('');
-        setReferenceImage(null);
-        setResearchStage('idle');
-        setThemes([]);
-    };
-
-    const handleModeChange = (newMode: Mode) => {
-        if (isLoading) return;
-        resetState();
-        setMode(newMode);
-    };
-
-    const handleStartResearch = async () => {
-        setResearchStage('researching');
-        setIsLoading(true);
-        setError(null);
-        try {
-            const suggestedThemes = await researchAndSuggestVideoThemes();
-            setThemes(suggestedThemes);
-            setResearchStage('selection');
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to research themes.');
-            setResearchStage('idle');
-        } finally {
-            setIsLoading(false);
+        if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
         }
     };
-    
-    const handleThemeSelection = (selectedTheme: VideoTheme) => {
-        setResearchStage('generating');
-        handleGenerate(selectedTheme.prompt, null); // Reference image is not part of auto-mode for simplicity
-    };
 
-    const handleGenerate = async (generationPrompt: string, refImage: string | null) => {
-        if (!generationPrompt.trim()) {
-            setError("Please enter a prompt.");
+    const handleGenerate = async () => {
+        if (!prompt.trim() && !image) {
+            setError('Please provide a text prompt or an image.');
             return;
         }
 
-        setIsLoading(true);
+        resetGenerationState();
+        setStage('generating');
         setError(null);
-        setVideoUrl(null);
+        setProgressMessage('Submitting video generation job...');
 
         try {
-            const finalOperation = await generateAndExtendVideo(generationPrompt, refImage, (message) => {
-                setProgressMessage(message);
-            });
-
-            // Fix: Set progress message after long polling is complete.
-            setProgressMessage('Video complete! Downloading file...');
-            // Fix: The service now returns the operation object, so this property access is correct.
-            const uri = finalOperation.response?.generatedVideos?.[0]?.video?.uri;
-            if (uri) {
-                const url = await fetchAndCreateVideoUrl(uri);
-                setVideoUrl(url);
-                if (mode === 'auto') setResearchStage('complete');
-            } else {
-                throw new Error('Generation completed, but no video URI was found.');
+            let imagePayload;
+            if (image) {
+                const [header, base64Data] = image.split(',');
+                const mimeType = header.match(/:(.*?);/)?.[1] || 'image/png';
+                imagePayload = { imageBytes: base64Data, mimeType };
             }
+
+            const operation = await generateVideo(prompt, imagePayload);
+            if (!operation || !operation.name) {
+                throw new Error("Failed to start video generation job. No operation name returned.");
+            }
+
+            setStage('polling');
+            setProgressMessage('Video is generating... This can take a few minutes.');
+            startPolling(operation.name);
+
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-            setError(errorMessage);
-            if (mode === 'auto') setResearchStage('idle');
-        } finally {
-            setIsLoading(false);
-            setProgressMessage('');
+            const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+            setError(message);
+            setStage('failed');
         }
     };
 
-    const renderResult = () => {
-        if (isLoading && researchStage !== 'researching') {
-            return (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                    <SpinnerIcon />
-                    <p className="text-slate-300 mt-4 text-lg font-semibold">{progressMessage}</p>
-                    <p className="text-slate-400 text-sm">A 35-second video can take several minutes. Please be patient.</p>
-                </div>
-            );
-        }
+    const startPolling = (operationName: string) => {
+        pollingRef.current = window.setInterval(async () => {
+            try {
+                const operation = await checkVideoOperationStatus(operationName);
+                if (operation.done) {
+                    if (pollingRef.current) clearInterval(pollingRef.current);
+                    
+                    if (operation.error) {
+                        throw new Error(operation.error.message || 'Operation failed with an error.');
+                    }
 
-        if (videoUrl) {
-            return (
-                <div className="flex flex-col items-center gap-4">
-                    <video src={videoUrl} controls autoPlay loop className="w-full h-auto max-h-[60vh] rounded-lg shadow-2xl bg-black" />
-                    <a href={videoUrl} download={`veo-video-${Date.now()}.mp4`} className="mt-4 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-full transition-colors duration-300 flex items-center gap-2">
-                        <DownloadIcon /> Download 35-Second Video
-                    </a>
-                </div>
-            );
-        }
-        
-        return (
-            <div className="flex flex-col items-center justify-center h-full text-center text-slate-500">
-                <VideoIcon />
-                <p className="mt-4">Your final 35-second video will appear here.</p>
-            </div>
-        );
+                    const uri = operation.response?.generatedVideos?.[0]?.video?.uri;
+                    if (!uri) {
+                        throw new Error("Video URI not found in operation response.");
+                    }
+
+                    setProgressMessage('Processing completed video...');
+                    const videoUrl = await fetchAndCreateVideoUrl(uri);
+                    
+                    setGeneratedVideoUrl(videoUrl);
+                    setStage('complete');
+                    
+                    const newHistoryItem: VideoHistoryItem = {
+                        id: operationName,
+                        src: videoUrl,
+                        prompt,
+                        image
+                    };
+                    setHistory(prev => [newHistoryItem, ...prev.filter(item => item.id !== newHistoryItem.id)]);
+                }
+            } catch (err) {
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                const message = err instanceof Error ? err.message : 'Polling for video status failed.';
+                setError(message);
+                setStage('failed');
+            }
+        }, POLLING_INTERVAL);
+    };
+    
+    const handleReuse = (item: VideoHistoryItem) => {
+        setPrompt(item.prompt);
+        setImage(item.image || null);
+        setGeneratedVideoUrl(item.src);
+        setStage('complete');
+        setError(null);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    const renderManualMode = () => (
-        <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg space-y-4">
-                    <h2 className="text-2xl font-bold text-cyan-400">1. Describe the Narrative</h2>
-                    <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g., 'A lone astronaut discovers a glowing crystal...'" className="w-full h-32 p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500" disabled={isLoading} />
-                    <ImageUploader label="Reference Image (Optional)" onImageUpload={(base64) => setReferenceImage(base64)} initialImage={referenceImage} />
-                </div>
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                    <h2 className="text-2xl font-bold text-cyan-400 mb-6 text-center">2. View Result</h2>
-                    <div className="w-full min-h-[400px] flex items-center justify-center bg-slate-900/50 rounded-lg p-4">
-                        {renderResult()}
-                    </div>
-                </div>
-            </div>
-             <div className="sticky bottom-0 left-0 right-0 -mx-4 md:-mx-8 mt-8 p-4 bg-slate-900/80 backdrop-blur-sm border-t border-slate-700/50 flex justify-center">
-                 <button onClick={() => handleGenerate(prompt, referenceImage)} disabled={isLoading || !prompt.trim()} className="w-full max-w-md bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-4 px-8 rounded-full text-lg shadow-lg transition-all">
-                    {isLoading ? 'Directing Your Video...' : '✨ Generate 35-Second Video'}
-                </button>
-            </div>
-        </>
-    );
-
-    const renderAutoMode = () => {
-        switch (researchStage) {
-            case 'idle':
-                return (
-                    <div className="text-center p-8 bg-slate-800/50 rounded-2xl">
-                        <h2 className="text-2xl font-bold text-cyan-400 mb-2">Automated Creative Director</h2>
-                        <p className="text-slate-400 mb-6 max-w-2xl mx-auto">Let AI analyze current market trends in the creative industry and suggest commercially viable video concepts for you.</p>
-                        <button onClick={handleStartResearch} disabled={isLoading} className="bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-8 rounded-full text-lg shadow-lg flex items-center gap-2 mx-auto">
-                            <SearchIcon /> Start Market Research
-                        </button>
-                    </div>
-                );
-            case 'researching':
-                 return (
-                    <div className="text-center p-8 bg-slate-800/50 rounded-2xl">
-                         <SpinnerIcon />
-                         <p className="text-slate-300 mt-4 text-lg">Analyzing creative industry trends...</p>
-                         <p className="text-slate-400 text-sm">This may take a moment.</p>
-                    </div>
-                 );
-            case 'selection':
-                return (
-                     <div className="bg-slate-800/50 p-6 rounded-2xl">
-                         <h2 className="text-2xl font-bold text-cyan-400 mb-4">Select a Video Theme</h2>
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {themes.map((theme, index) => (
-                                <div key={index} className="bg-slate-900/50 p-4 rounded-lg flex flex-col justify-between">
-                                    <div>
-                                        <h3 className="font-bold text-white mb-2">{theme.title}</h3>
-                                        <p className="text-sm text-slate-400 mb-4">{theme.description}</p>
-                                    </div>
-                                    <button onClick={() => handleThemeSelection(theme)} className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 px-4 rounded-full transition-colors">
-                                        Select & Generate Video
-                                    </button>
-                                </div>
-                            ))}
-                         </div>
-                     </div>
-                );
-            case 'generating':
-            case 'complete':
-                 return (
-                    <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                        <h2 className="text-2xl font-bold text-cyan-400 mb-6 text-center">AI-Generated Video</h2>
-                        <div className="w-full min-h-[400px] flex items-center justify-center bg-slate-900/50 rounded-lg p-4">
-                            {renderResult()}
-                        </div>
-                        {videoUrl && (
-                             <button onClick={resetState} className="text-cyan-400 hover:underline mt-6 mx-auto block">Start New Research</button>
-                        )}
-                    </div>
-                 );
-        }
-    };
-
+    const isLoading = stage === 'generating' || stage === 'polling';
+    
     return (
         <div className="space-y-8">
-            <div className="flex justify-center bg-slate-800/50 p-1 rounded-full max-w-sm mx-auto">
-                <button onClick={() => handleModeChange('manual')} className={`w-1/2 py-2 rounded-full text-sm font-semibold transition-colors ${mode === 'manual' ? 'bg-cyan-500 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Manual Mode</button>
-                <button onClick={() => handleModeChange('auto')} className={`w-1/2 py-2 rounded-full text-sm font-semibold transition-colors ${mode === 'auto' ? 'bg-cyan-500 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>Automated Mode</button>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg space-y-6">
+                    <h2 className="text-2xl font-bold text-cyan-400">Video Prompt</h2>
+                    <div>
+                        <label htmlFor="prompt" className="block text-slate-300 font-semibold mb-2">Describe your video:</label>
+                        <textarea
+                            id="prompt"
+                            value={prompt}
+                            onChange={(e) => setPrompt(e.target.value)}
+                            placeholder="e.g., 'A neon hologram of a cat driving a sports car at top speed on a rainy night in Tokyo'"
+                            className="w-full h-32 p-3 bg-slate-700/50 border border-slate-600 rounded-lg"
+                            disabled={isLoading}
+                        />
+                    </div>
+                    <ImageUploader 
+                        label="Add a Starting Image (Optional)"
+                        onImageUpload={(base64) => setImage(base64)}
+                        initialImage={image}
+                    />
+                    <button
+                        onClick={handleGenerate}
+                        disabled={isLoading || (!prompt.trim() && !image)}
+                        className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg flex items-center justify-center gap-2"
+                    >
+                        {isLoading ? <SpinnerIcon /> : 'Generate Video'}
+                    </button>
+                </div>
+
+                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg min-h-[400px] flex flex-col justify-center items-center">
+                    <h2 className="text-2xl font-bold text-cyan-400 mb-6 text-center">Generated Video</h2>
+                    
+                    {stage === 'idle' && (
+                        <div className="text-center text-slate-500">
+                            <VideoIcon />
+                            <p className="mt-4">Your generated video will appear here.</p>
+                        </div>
+                    )}
+
+                    {(stage === 'generating' || stage === 'polling') && (
+                        <div className="text-center text-slate-400">
+                            <SpinnerIcon />
+                            <p className="mt-4 text-lg font-semibold">{progressMessage}</p>
+                            <p className="text-sm text-slate-500">Please be patient, video generation can take several minutes.</p>
+                        </div>
+                    )}
+                    
+                    {stage === 'failed' && error && (
+                        <div className="text-center bg-red-900/20 p-4 rounded-lg">
+                            <p className="text-red-400 font-semibold">Generation Failed</p>
+                            <p className="text-slate-300 mt-2 text-sm break-words">{error}</p>
+                        </div>
+                    )}
+
+                    {stage === 'complete' && generatedVideoUrl && (
+                        <div className="w-full">
+                            <video src={generatedVideoUrl} controls autoPlay loop className="w-full rounded-lg shadow-2xl" />
+                            <div className="flex justify-center mt-4">
+                                <a href={generatedVideoUrl} download={`ai-video-${Date.now()}.mp4`} className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-full">
+                                    Download Video
+                                </a>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
-            
-            {error && <div className="bg-red-900/20 p-4 rounded-lg text-center text-red-400">{error}</div>}
-            
-            {mode === 'manual' ? renderManualMode() : renderAutoMode()}
+
+            <div className="mt-12">
+                <h2 className="text-2xl font-bold text-cyan-400 mb-6 text-center lg:text-left">Video History</h2>
+                {history.length > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                        {history.map(item => (
+                            <div key={item.id} onClick={() => handleReuse(item)} className="group relative aspect-video bg-slate-800 rounded-lg overflow-hidden shadow-lg cursor-pointer">
+                                <video src={item.src} muted loop className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <p className="text-white font-bold">Reuse</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-center text-slate-500 mt-6 bg-slate-800/50 py-8 rounded-lg">
+                        Your generated videos will appear here.
+                    </p>
+                )}
+            </div>
         </div>
     );
 };
