@@ -240,12 +240,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             case 'generateVideo': {
                 const token = await getAuthToken(); // Veo needs Vertex Auth
                 const endpoint = `${VERTEX_AI_API_BASE}/publishers/google/models/${VEO_MODEL_ID}:generateVideos`;
+                // FIX: The Vertex AI REST API expects camelCase keys in the request body, not snake_case.
                 const requestBody = {
                     prompt: payload.prompt,
-                    video_generation_config: {
-                        number_of_videos: 1,
+                    videoGenerationConfig: {
+                        numberOfVideos: 1,
                         resolution: "1080p",
-                        aspect_ratio: payload.aspectRatio,
+                        aspectRatio: payload.aspectRatio,
                     }
                 }
                  const response = await fetch(endpoint, {
@@ -285,7 +286,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             case 'fetchVideo': {
                 const { uri } = payload;
-                const fetchUrl = `${uri}?key=${process.env.API_KEY}`;
+                // FIX: Make URL construction more robust to handle URIs with or without existing query parameters.
+                const separator = uri.includes('?') ? '&' : '?';
+                const fetchUrl = `${uri}${separator}key=${process.env.API_KEY}`;
                 const videoResponse = await fetch(fetchUrl);
                 
                 if (!videoResponse.ok) {
