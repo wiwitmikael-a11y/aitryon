@@ -1,5 +1,3 @@
-import { VideosOperation } from "@google/genai";
-
 // ---- Types ----
 export interface AssetMetadata {
     title: string;
@@ -111,7 +109,7 @@ export async function generateAndExtendVideo(
     prompt: string,
     referenceImage: string | null,
     progressCallback: (message: string) => void
-): Promise<VideosOperation> {
+): Promise<any> {
     // This complex orchestration remains on the client to avoid serverless timeouts.
     progressCallback("Generating initial 7-second clip (1/5)...");
     let initialOperation = await callProxy('generateVideo', { prompt, referenceImage });
@@ -157,11 +155,11 @@ export async function generateCreativeStrategy(topic: string, photoCount: number
     return callProxy('generateCreativeStrategy', { topic, photoCount, videoCount });
 }
 
-export async function generateVideo(prompt: string): Promise<VideosOperation> {
+export async function generateVideo(prompt: string): Promise<any> {
     return callProxy('generateVideo', { prompt });
 }
 
-export async function checkVideoOperationStatus(operation: VideosOperation): Promise<VideosOperation> {
+export async function checkVideoOperationStatus(operation: any): Promise<any> {
     return callProxy('checkVideoOperation', { operation });
 }
 

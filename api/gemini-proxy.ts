@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI, Type, VideosOperation } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 let ai: GoogleGenAI;
 
