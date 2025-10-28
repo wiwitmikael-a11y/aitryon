@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db } from './lib/db';
-import { getGoogleAuthToken } from './lib/google-auth';
-import { VERTEX_AI_API_BASE, VIRTUAL_TRY_ON_MODEL_ID } from '../src/constants';
-import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse, Job } from '../src/types';
+import { db } from './lib/db.ts';
+import { getGoogleAuthToken } from './lib/google-auth.ts';
+import { VERTEX_AI_API_BASE, VIRTUAL_TRY_ON_MODEL_ID } from '../src/constants.ts';
+import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse, Job } from '../src/types.ts';
 
 // --- AUTHENTICATION ---
 // This background job is for VIRTUAL TRY-ON.

@@ -1,6 +1,5 @@
-import { GoogleAuth } from 'google-auth-library';
-// FIX: Add import for Buffer to resolve TypeScript type error.
-import { Buffer } from 'buffer';
+import { GoogleAuth } from "https://aistudiocdn.com/google-auth-library@^10.4.2";
+import { Buffer } from "https://aistudiocdn.com/buffer@^6.0.3";
 
 let authToken: string | null = null;
 let tokenExpiry: Date | null = null;

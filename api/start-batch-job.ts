@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db } from './lib/db';
-import type { BatchJob } from '../src/types';
+import { db } from './lib/db.ts';
+import type { BatchJob } from '../src/types.ts';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {

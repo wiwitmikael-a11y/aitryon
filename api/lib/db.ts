@@ -1,5 +1,5 @@
-import { kv } from "@vercel/kv";
-import type { Job, BatchJob } from '../../src/types';
+import { kv } from "https://esm.sh/@vercel/kv@^1.0.1";
+import type { Job, BatchJob } from '../../src/types.ts';
 
 // Use a union type for things we can store
 type Storable = Job | BatchJob;
