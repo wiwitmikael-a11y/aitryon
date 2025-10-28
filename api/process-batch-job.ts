@@ -26,8 +26,8 @@ async function generateImageForPrompt(prompt: string, aspectRatio: '1:1' | '16:9
         },
     });
     
-    const image = imageResponse.generatedImages[0];
-    if (!image?.image.imageBytes) throw new Error("Image generation failed, no bytes returned.");
+    const image = imageResponse?.generatedImages?.[0];
+    if (!image?.image?.imageBytes) throw new Error("Image generation failed, no bytes returned.");
 
     const src = `data:image/png;base64,${image.image.imageBytes}`;
     return { src };

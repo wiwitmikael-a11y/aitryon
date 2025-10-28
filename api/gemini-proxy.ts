@@ -111,7 +111,7 @@ Your response MUST be a valid JSON object with two keys: "theme" (a string for t
     });
 
     try {
-        const text = response.text.trim();
+        const text = response.text?.trim() ?? '';
         if (!text) {
             throw new Error("Gemini returned an empty response for photo shoot prompts.");
         }
@@ -146,7 +146,7 @@ async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' 
         config: { systemInstruction }
     });
 
-    return { prompt: response.text.trim() };
+    return { prompt: response.text?.trim() ?? '' };
 }
 
 async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }: any) {
@@ -167,7 +167,7 @@ async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }:
         contents: prompt,
         config: { responseMimeType: "application/json" }
     });
-    return JSON.parse(response.text);
+    return JSON.parse(response.text ?? '{}');
 }
 
 async function handleGenerateStockImage({ prompt, aspectRatio, generateMetadata }: any) {
@@ -183,8 +183,8 @@ async function handleGenerateStockImage({ prompt, aspectRatio, generateMetadata 
         },
     });
     
-    const image = imageResponse.generatedImages[0];
-    if (!image?.image.imageBytes) throw new Error("Image generation failed, no bytes returned.");
+    const image = imageResponse?.generatedImages?.[0];
+    if (!image?.image?.imageBytes) throw new Error("Image generation failed, no bytes returned.");
 
     const src = `data:image/png;base64,${image.image.imageBytes}`;
 
@@ -221,7 +221,7 @@ async function handleGenerateMetadataForAsset({ prompt, type }: any) {
         }
     });
 
-    return JSON.parse(response.text);
+    return JSON.parse(response.text ?? '{}');
 }
 
 
