@@ -67,8 +67,22 @@ export const generateCreativePrompt = async (
 };
 
 // --- Viral Affiliate Video Functions ---
-export const generateVideoBrief = async (productImage: string, description: string, language: string): Promise<any> => {
-    return callGeminiProxy('generateVideoBrief', { productImage, description, language });
+export const generateVideoBrief = async (
+    productImage: string, 
+    description: string, 
+    language: string,
+    marketingAngle: string,
+    visualStyle: string,
+    narrationStyle: string
+): Promise<any> => {
+    return callGeminiProxy('generateVideoBrief', { 
+        productImage, 
+        description, 
+        language,
+        marketingAngle,
+        visualStyle,
+        narrationStyle
+    });
 };
 
 export const generateVideoStoryboard = async (brief: any, language: string, aspectRatio: string): Promise<any> => {

@@ -234,20 +234,48 @@ async function handleFetchVideo({ uri }: any) {
 
 
 // --- Viral Affiliate Video Handlers ---
-async function handleGenerateVideoBrief({ productImage, description, language }: { productImage: string, description: string, language: string }) {
+async function handleGenerateVideoBrief({ 
+    productImage, 
+    description, 
+    language,
+    marketingAngle,
+    visualStyle,
+    narrationStyle 
+}: { 
+    productImage: string, 
+    description: string, 
+    language: string,
+    marketingAngle: string,
+    visualStyle: string,
+    narrationStyle: string
+}) {
     const model = 'gemini-2.5-pro';
     const base64Data = productImage.startsWith('data:') ? productImage.split(',')[1] : productImage;
     
     const prompt = language === 'indonesia' ?
-        `Kamu adalah AI Marketing Analyst untuk pasar Indonesia. Berdasarkan gambar produk ini dan deskripsi ini: "${description}", tentukan:
+        `Kamu adalah AI Marketing Analyst untuk pasar Indonesia. Berdasarkan gambar produk, deskripsi, dan arahan kreatif ini:
+        - Deskripsi Produk: "${description}"
+        - Angle Pemasaran: "${marketingAngle}"
+        - Gaya Visual Video: "${visualStyle}"
+        - Gaya Narasi Suara: "${narrationStyle}"
+        
+        Tentukan:
         * Target Audiens: (Contoh: 'Ibu muda', 'Gamers', 'Pekerja kantoran').
-        * Masalah Utama: (Masalah yang diselesaikan produk ini).
-        * Fitur Kunci: (3 fitur utama).
+        * Masalah Utama: (Masalah yang diselesaikan produk ini, sesuaikan dengan angle).
+        * Fitur Kunci: (3 fitur utama yang paling relevan dengan angle).
+        
         Kembalikan jawaban HANYA dalam format JSON.` :
-        `You are an AI Marketing Analyst for the global market. Based on this product image and this description: "${description}", determine:
+        `You are an AI Marketing Analyst for the global market. Based on this product image, description, and creative direction:
+        - Product Description: "${description}"
+        - Marketing Angle: "${marketingAngle}"
+        - Video Visual Style: "${visualStyle}"
+        - Voice Narration Style: "${narrationStyle}"
+        
+        Determine:
         * Target Audience: (e.g., 'Young mothers', 'Gamers', 'Office workers').
-        * Main Problem: (The problem this product solves).
-        * Key Features: (3 main features).
+        * Main Problem: (The problem this product solves, aligned with the angle).
+        * Key Features: (3 key features most relevant to the angle).
+        
         Return the answer ONLY in JSON format.`;
 
     const imagePart = {
@@ -270,18 +298,18 @@ async function handleGenerateVideoStoryboard({ brief, language, aspectRatio }: {
     const model = 'gemini-2.5-pro';
     
     const prompt = language === 'indonesia' ?
-    `Kamu adalah penulis storyboard dan sutradara video TikTok/Reels viral. Gunakan data ini: ${JSON.stringify(brief)}.
+    `Kamu adalah penulis storyboard dan sutradara video TikTok/Reels viral. Gunakan brief strategis ini: ${JSON.stringify(brief)}.
     Buat storyboard untuk video ${aspectRatio} dalam Bahasa Indonesia. Total durasi video harus sekitar 35 detik.
     Buat 5 adegan (scenes). Untuk setiap adegan, kembalikan JSON dengan kunci berikut:
-    * "veo_prompt": String tunggal yang berisi instruksi lengkap untuk AI video generator (Veo). Prompt ini HARUS mencakup: 1. Deskripsi visual yang mendetail, elegan, dan sinematik. 2. Naskah voice-over LENGKAP yang harus diucapkan dalam adegan ini dengan gaya influencer yang energik dan profesional. 3. Permintaan untuk "elegant and suitable background music" dengan volume rendah. PENTING: Untuk adegan pertama, instruksikan untuk menggunakan gambar produk asli sebagai fokus utama.
-    * "display_voice_over": String yang hanya berisi teks naskah voice-over untuk ditampilkan di UI.
-    Pastikan alur ceritanya persuasif (AIDA). Kembalikan HANYA sebagai array JSON.` :
-    `You are a viral TikTok/Reels storyboard writer and director. Use this data: ${JSON.stringify(brief)}.
+    * "veo_prompt_base": String yang berisi instruksi visual untuk AI video generator (Veo), TIDAK TERMASUK narasi atau musik. Prompt ini HARUS mencakup: Deskripsi visual yang mendetail sesuai dengan "Gaya Visual Video" dari brief. PENTING: Untuk adegan pertama, instruksikan untuk menggunakan gambar produk asli sebagai fokus utama.
+    * "display_voice_over": String yang HANYA berisi naskah voice-over untuk adegan ini. Naskah harus ditulis dengan "Gaya Narasi Suara" dari brief.
+    Pastikan alur ceritanya persuasif dan sesuai dengan "Angle Pemasaran" dari brief. Kembalikan HANYA sebagai array JSON.` :
+    `You are a viral TikTok/Reels storyboard writer and director. Use this strategic brief: ${JSON.stringify(brief)}.
     Create a storyboard for a ${aspectRatio} video in English. The total video duration should be approximately 35 seconds.
     Create 5 scenes. For each scene, return a JSON object with the following keys:
-    * "veo_prompt": A single string containing a comprehensive prompt for an AI video generator (Veo). This prompt MUST include: 1. A detailed, elegant, and cinematic visual description. 2. The FULL voice-over script to be spoken in this scene in an energetic, professional influencer style. 3. A request for "elegant and suitable background music" at a low volume. IMPORTANT: For the first scene, instruct it to use the original product image as the main focus.
-    * "display_voice_over": A string containing only the voice-over script text for UI display purposes.
-    Make the story persuasive (AIDA). Return ONLY as a JSON array.`;
+    * "veo_prompt_base": A string containing the visual instructions for an AI video generator (Veo), EXCLUDING any narration or music. This prompt MUST include: A detailed visual description that matches the "Video Visual Style" from the brief. IMPORTANT: For the first scene, instruct it to use the original product image as the main focus.
+    * "display_voice_over": A string containing ONLY the voice-over script for this scene. The script should be written in the "Voice Narration Style" from the brief.
+    Make the story persuasive and align with the "Marketing Angle" from the brief. Return ONLY as a JSON array.`;
     
     const response = await ai.models.generateContent({
         model,
