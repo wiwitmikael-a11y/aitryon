@@ -1,8 +1,9 @@
 {
-  "functions": {
-    "api/**/*.ts": {
-      "runtime": "nodejs22.x"
+  "builds": [
+    {
+      "src": "api/**/*.ts",
+      "use": "@vercel/node"
     }
-  },
+  ],
   "installCommand": "npm install"
 }
