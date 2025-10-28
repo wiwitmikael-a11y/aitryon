@@ -14,7 +14,6 @@ const Header: React.FC<HeaderProps> = ({ activeTool, onNavigateHome }) => {
     'stock-photo': 'AI Art Director',
     'video-generator': 'Cinematic Video Director',
     'creative-director': 'AI Creative Director',
-    'quant-manager': 'AI Quant Fund Manager'
   }
 
   return (

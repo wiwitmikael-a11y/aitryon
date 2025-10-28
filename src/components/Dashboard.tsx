@@ -4,7 +4,6 @@ import { TryOnIcon } from './icons/TryOnIcon';
 import { PhotoIcon } from './icons/PhotoIcon';
 import { VideoGeneratorIcon } from './icons/VideoGeneratorIcon';
 import { DirectorIcon } from './icons/DirectorIcon'; 
-import { QuantIcon } from './icons/QuantIcon';
 
 interface DashboardProps {
   onSelectTool: (tool: Tool) => void;
@@ -35,12 +34,6 @@ const tools: { id: Tool; title: string; description: string; icon: React.FC }[] 
     description: 'Develop a content strategy and generate a package of photos and videos from a single idea.',
     icon: DirectorIcon,
   },
-  {
-    id: 'quant-manager',
-    title: 'AI Quant Fund Manager',
-    description: 'Provide market analysis to an AI fund manager and receive structured trading mandates.',
-    icon: QuantIcon,
-  }
 ];
 
 const Dashboard: React.FC<DashboardProps> = ({ onSelectTool }) => {

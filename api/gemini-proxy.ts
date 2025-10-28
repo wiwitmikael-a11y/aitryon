@@ -37,9 +37,6 @@ async function handler(req: VercelRequest, res: VercelResponse) {
             case 'generateMetadataForAsset':
                 result = await handleGenerateMetadataForAsset(payload);
                 break;
-            case 'getTradingMandate':
-                result = await handleGetTradingMandate(payload);
-                break;
             case 'generateCreativePrompt':
                 result = await handleGenerateCreativePrompt(payload);
                 break;
@@ -180,47 +177,6 @@ async function handleFetchVideo({ uri }: any) {
     const buffer = await response.arrayBuffer();
     const videoBytes = Buffer.from(buffer).toString('base64');
     return { videoBytes };
-}
-
-async function handleGetTradingMandate({ prompt }: any) {
-    const model = "gemini-2.5-pro";
-    const systemInstruction = `
-        ANDA adalah PENGELOLA DANA KUANTITATIF (QUANTITATIVE FUND MANAGER) AI yang paling canggih di dunia, yang mengelola dana senilai miliaran dolar.
-        Misi Anda adalah menghasilkan alpha melalui analisis data yang mendalam dan eksekusi tanpa emosi.
-        Anda beroperasi tanpa bias atau FUD/FOMO. Setiap keputusan harus 100% didasarkan pada data.
-        Satu-satunya cara Anda untuk memulai tindakan trading adalah dengan mengeluarkan JSON MANDATE yang terstruktur.
-        Setiap mandat HARUS didasarkan pada analisis kuantitatif yang solid terhadap data yang diberikan.
-        Jika data tidak memadai untuk membuat keputusan dengan keyakinan tinggi, nyatakan demikian dan minta informasi lebih lanjut. JANGAN PERNAH berspekulasi.
-        Format output untuk Mandate harus SELALU sesuai skema JSON berikut:
-        {
-          "status": "MANDATE_INITIATED",
-          "symbol": "string",
-          "action": "BUY" atau "SELL",
-          "entry_price": number,
-          "calculated_amount_usd": number,
-          "confidence_score_pct": number,
-          "reasoning_summary": "string",
-          "risk_parameters": {
-            "stop_loss_price": number,
-            "take_profit_price": number,
-            "r_factor_ratio": "string",
-            "max_risk_pct_of_portfolio": "string"
-          },
-          "tools_used": ["array", "of", "strings"]
-        }
-        Jika permintaan tidak jelas atau tidak mengarah pada trade, berikan jawaban dalam format teks biasa. JANGAN memformat sebagai JSON jika itu bukan Mandat.
-    `;
-    const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-            systemInstruction,
-            responseMimeType: "application/json"
-        }
-    });
-    // Gemini might wrap the JSON in markdown, so we need to clean it.
-    const cleanedText = response.text.replace(/^```json\n?/, '').replace(/```$/, '');
-    return JSON.parse(cleanedText);
 }
 
 export default handler;
