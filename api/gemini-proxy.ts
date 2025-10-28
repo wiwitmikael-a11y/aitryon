@@ -1,328 +1,67 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { ai } from './lib/google-auth';
+import { Modality, Type } from '@google/genai';
 import {
     VIRTUAL_TRY_ON_MODEL,
     STOCK_PHOTO_MODEL,
     VIDEO_GENERATION_MODEL,
     TEXT_MODEL,
-    ADVANCED_TEXT_MODEL
+    ADVANCED_TEXT_MODEL,
 } from './lib/constants';
-import { Modality, Type } from '@google/genai';
-import { Buffer } from 'buffer';
 
-// --- HELPER FUNCTIONS ---
-
-/**
- * Extracts the MIME type and base64 data from a data URL string.
- * @param dataUrl The data URL (e.g., "data:image/png;base64,...").
- * @returns An object with mimeType and data.
- */
-const getBase64AndMimeFromDataUrl = (dataUrl: string) => {
-    const match = dataUrl.match(/^data:(.+);base64,(.+)$/);
-    if (!match) throw new Error("Invalid data URL format. Expected 'data:mime/type;base64,...'");
-    return { mimeType: match[1], data: match[2] };
-};
+// Re-defining this interface here to avoid path resolution issues on Vercel.
+interface AssetMetadata {
+    title: string;
+    description: string;
+    tags: string[];
+}
 
 /**
- * Generates SEO-friendly metadata for a given creative prompt.
- * @param prompt The prompt used to generate the asset.
- * @param type The type of asset ('photo' or 'video').
- * @returns A promise resolving to the generated metadata.
+ * A helper function to generate metadata for a given asset prompt.
+ * @param payload The prompt and type of asset.
+ * @returns A promise that resolves to the asset metadata.
  */
-async function generateMetadataForAsset(prompt: string, type: 'photo' | 'video'): Promise<{ title: string, description: string, tags: string[] }> {
-    const metadataPrompt = `
-        Based on the following creative prompt for a ${type}, generate suitable metadata for a stock asset website.
-        Prompt: "${prompt}"
-
-        Provide a short, catchy title (5-10 words).
-        Provide a brief, descriptive caption (15-30 words).
-        Provide a list of 5-10 relevant, lowercase, single-word tags that are good for SEO.
-    `;
-
-    const responseSchema = {
-        type: Type.OBJECT,
-        properties: {
-            title: { type: Type.STRING, description: 'A short, catchy title (5-10 words).' },
-            description: { type: Type.STRING, description: 'A brief, descriptive caption (15-30 words).' },
-            tags: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: 'A list of 5-10 relevant, lowercase, single-word tags.'
-            },
-        },
-        required: ['title', 'description', 'tags'],
-    };
+async function handleGenerateMetadataForAsset(
+    payload: { prompt: string; type: 'photo' | 'video' }
+): Promise<AssetMetadata> {
+    const { prompt, type } = payload;
+    const assetType = type === 'photo' ? 'stock photo' : 'short video';
+    const metadataPrompt = `You are a stock media specialist. Generate metadata for a ${assetType} created from the following prompt:
+"${prompt}"
+Generate a short, catchy title (max 10 words).
+Generate a concise description (max 30 words).
+Generate a list of 5-10 relevant keywords/tags.
+Return the result as a JSON object with keys: "title", "description", and "tags" (an array of strings).`;
 
     const response = await ai.models.generateContent({
         model: TEXT_MODEL,
         contents: metadataPrompt,
         config: {
             responseMimeType: 'application/json',
-            responseSchema: responseSchema,
-        },
-    });
-
-    const jsonText = response.text.trim();
-    return JSON.parse(jsonText);
-}
-
-
-// --- TASK HANDLERS ---
-
-async function handleVirtualTryOn(payload: any, res: VercelResponse) {
-    const { personImage, productImage } = payload;
-    if (!personImage || !productImage) {
-        return res.status(400).json({ error: 'Missing person or product image.' });
-    }
-
-    const { mimeType: personMime, data: personData } = getBase64AndMimeFromDataUrl(personImage);
-    const personImagePart = { inlineData: { mimeType: personMime, data: personData } };
-
-    const { mimeType: productMime, data: productData } = getBase64AndMimeFromDataUrl(productImage);
-    const productImagePart = { inlineData: { mimeType: productMime, data: productData } };
-
-    const textPart = { text: 'Take the clothing item from the second image and realistically place it on the person from the first image.' };
-
-    const response = await ai.models.generateContent({
-        model: VIRTUAL_TRY_ON_MODEL,
-        contents: {
-            parts: [personImagePart, productImagePart, textPart],
-        },
-        config: {
-            responseModalities: [Modality.IMAGE],
-        },
-    });
-
-    const imagePart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (imagePart?.inlineData) {
-        const base64ImageBytes: string = imagePart.inlineData.data;
-        const mimeType = imagePart.inlineData.mimeType || 'image/png';
-        return res.status(200).json({ resultImage: `data:${mimeType};base64,${base64ImageBytes}` });
-    }
-
-    throw new Error('No image was generated by the model.');
-}
-
-async function handleGenerateCreativeStrategy(payload: any, res: VercelResponse) {
-    const { topic, photoCount, videoCount } = payload;
-
-    const prompt = `
-        Based on the marketing campaign topic "${topic}", generate a list of ${photoCount} distinct photo prompts and ${videoCount} distinct video prompts.
-        The prompts should be creative, highly detailed, and aligned with the central topic.
-        Each prompt should be a single, complete sentence describing a specific visual scene.
-    `;
-
-    const responseSchema = {
-        type: Type.OBJECT,
-        properties: {
-            photoPrompts: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-            },
-            videoPrompts: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    tags: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                    },
+                },
+                required: ['title', 'description', 'tags'],
             },
         },
-        required: ['photoPrompts', 'videoPrompts']
-    };
-
-    const response = await ai.models.generateContent({
-        model: ADVANCED_TEXT_MODEL,
-        contents: prompt,
-        config: {
-            responseMimeType: 'application/json',
-            responseSchema: responseSchema
-        },
     });
 
-    const data = JSON.parse(response.text.trim());
-    data.photoPrompts = data.photoPrompts.slice(0, photoCount);
-    data.videoPrompts = data.videoPrompts.slice(0, videoCount);
-
-    return res.status(200).json(data);
+    return JSON.parse(response.text);
 }
 
-async function handleGenerateMetadataForAsset(payload: any, res: VercelResponse) {
-    const { prompt, type } = payload;
-    const result = await generateMetadataForAsset(prompt, type);
-    return res.status(200).json(result);
-}
-
-async function handleGenerateStockImage(payload: any, res: VercelResponse) {
-    const { prompt, aspectRatio, generateMetadata } = payload;
-
-    const response = await ai.models.generateImages({
-        model: STOCK_PHOTO_MODEL,
-        prompt: prompt,
-        config: {
-            numberOfImages: 1,
-            outputMimeType: 'image/png',
-            aspectRatio: aspectRatio,
-        },
-    });
-
-    const base64ImageBytes: string = response.generatedImages[0].image.imageBytes;
-    const src = `data:image/png;base64,${base64ImageBytes}`;
-
-    if (generateMetadata) {
-        const metadata = await generateMetadataForAsset(prompt, 'photo');
-        return res.status(200).json({ src, metadata });
-    }
-
-    return res.status(200).json({ src });
-}
-
-async function handleGeneratePhotoShootPackage(payload: any, res: VercelResponse) {
-    const { aspectRatio } = payload;
-    const imageCount = 10;
-
-    const themePrompt = `
-        You are an AI Art Director for a photo shoot.
-        Generate a cohesive theme for a set of ${imageCount} stock photos.
-        Then, generate ${imageCount} distinct, detailed, and creative prompts for images that fit this theme.
-        The prompts should describe different scenes, angles, or subjects but all relate to the central theme.
-    `;
-
-    const themeResponseSchema = {
-        type: Type.OBJECT,
-        properties: {
-            theme: { type: Type.STRING, description: "A short, catchy theme for the photo shoot." },
-            prompts: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: `A list of exactly ${imageCount} detailed image prompts.`
-            },
-        },
-        required: ['theme', 'prompts']
-    };
-
-    const themeResponse = await ai.models.generateContent({
-        model: ADVANCED_TEXT_MODEL,
-        contents: themePrompt,
-        config: {
-            responseMimeType: 'application/json',
-            responseSchema: themeResponseSchema
-        },
-    });
-
-    const { theme, prompts } = JSON.parse(themeResponse.text.trim());
-
-    const imageGenerationPromises = prompts.slice(0, imageCount).map((p: string) =>
-        ai.models.generateImages({
-            model: STOCK_PHOTO_MODEL,
-            prompt: p,
-            config: {
-                numberOfImages: 1,
-                outputMimeType: 'image/png',
-                aspectRatio: aspectRatio,
-            },
-        }).then(response => ({
-            prompt: p,
-            src: `data:image/png;base64,${response.generatedImages[0].image.imageBytes}`
-        })).catch(err => ({
-            prompt: p,
-            src: null,
-            error: err.message
-        }))
-    );
-
-    const generatedImages = await Promise.all(imageGenerationPromises);
-
-    const results = generatedImages.map((result, index) => ({
-        id: `batch-img-${index}`,
-        prompt: result.prompt,
-        src: result.src,
-    }));
-
-    return res.status(200).json({ theme, results });
-}
-
-async function handleGenerateVideo(payload: any, res: VercelResponse) {
-    const { prompt, aspectRatio } = payload;
-
-    const operation = await ai.models.generateVideos({
-        model: VIDEO_GENERATION_MODEL,
-        prompt: prompt,
-        config: {
-            numberOfVideos: 1,
-            resolution: '1080p',
-            aspectRatio: aspectRatio,
-        }
-    });
-
-    return res.status(200).json(operation);
-}
-
-async function handleCheckVideoOperationStatus(payload: any, res: VercelResponse) {
-    const { operationName } = payload;
-    if (!operationName || typeof operationName !== 'string') {
-        return res.status(400).json({ error: 'Missing or invalid operationName.' });
-    }
-    // The SDK expects an object with a 'name' property for the operation.
-    const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
-    return res.status(200).json(operation);
-}
-
-async function handleFetchVideo(payload: any, res: VercelResponse) {
-    const { uri } = payload;
-    if (!process.env.API_KEY) {
-        throw new Error("API_KEY is not configured on the server.");
-    }
-    const fetchUrl = `${uri}&key=${process.env.API_KEY}`;
-    
-    // Using native fetch, available in modern Node.js runtimes like Vercel's.
-    const videoResponse = await fetch(fetchUrl);
-    if (!videoResponse.ok) {
-        throw new Error(`Failed to fetch video from generated URI. Status: ${videoResponse.status}`);
-    }
-
-    const videoBuffer = await videoResponse.arrayBuffer();
-    const videoBytes = Buffer.from(videoBuffer).toString('base64');
-
-    return res.status(200).json({ videoBytes });
-}
-
-async function handleGenerateCreativePrompt(payload: any, res: VercelResponse) {
-    const { type } = payload;
-
-    let systemInstruction = '';
-    let contents = 'Generate a creative concept.';
-
-    switch (type) {
-        case 'photo':
-            systemInstruction = 'You are an AI Art Director. Generate a short, vivid, and highly detailed prompt for a stunning, professional stock photo. Focus on cinematic lighting, composition, and realism. Do not include camera settings.';
-            break;
-        case 'video':
-            systemInstruction = 'You are an AI Film Director. Generate a short, vivid, and highly detailed prompt for a cinematic video scene. Focus on action, mood, and visual storytelling. The video should be under 10 seconds. Do not include camera settings.';
-            break;
-        case 'campaign':
-            systemInstruction = 'You are an AI Creative Director. Generate a short, compelling, high-level marketing campaign topic or theme. It should be 5-10 words. For example: "The future of urban commuting" or "A taste of the Mediterranean summer".';
-            contents = 'Generate one campaign topic.';
-            break;
-        default:
-            return res.status(400).json({ error: "Invalid prompt type specified." });
-    }
-
-    const response = await ai.models.generateContent({
-        model: TEXT_MODEL,
-        contents: contents,
-        config: {
-            systemInstruction: systemInstruction,
-            temperature: 0.9,
-        },
-    });
-
-    const prompt = response.text.trim().replace(/^"|"$/g, '');
-    return res.status(200).json({ prompt });
-}
-
-
-// --- MAIN ROUTER/HANDLER ---
-
+/**
+ * The main Vercel serverless function handler.
+ * It routes requests based on the 'task' property in the request body.
+ */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') {
-        res.setHeader('Allow', 'POST');
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
@@ -330,30 +69,210 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { task, ...payload } = req.body;
 
         switch (task) {
-            case 'virtualTryOn':
-                return await handleVirtualTryOn(payload, res);
-            case 'generateCreativeStrategy':
-                return await handleGenerateCreativeStrategy(payload, res);
-            case 'generateMetadataForAsset':
-                return await handleGenerateMetadataForAsset(payload, res);
-            case 'generateStockImage':
-                return await handleGenerateStockImage(payload, res);
-            case 'generatePhotoShootPackage':
-                return await handleGeneratePhotoShootPackage(payload, res);
-            case 'generateVideo':
-                return await handleGenerateVideo(payload, res);
-            case 'checkVideoOperationStatus':
-                return await handleCheckVideoOperationStatus(payload, res);
-            case 'fetchVideo':
-                return await handleFetchVideo(payload, res);
-            case 'generateCreativePrompt':
-                return await handleGenerateCreativePrompt(payload, res);
+            case 'virtualTryOn': {
+                const { personImage, productImage } = payload;
+                if (!personImage || !productImage) {
+                    return res.status(400).json({ error: 'Missing person or product image' });
+                }
+
+                const personImagePart = {
+                    inlineData: {
+                        mimeType: personImage.match(/data:(.*);base64,/)?.[1] || 'image/png',
+                        data: personImage.split(',')[1],
+                    },
+                };
+                const productImagePart = {
+                    inlineData: {
+                        mimeType: productImage.match(/data:(.*);base64,/)?.[1] || 'image/png',
+                        data: productImage.split(',')[1],
+                    },
+                };
+                const textPart = { text: 'Put the clothing item from the second image onto the person in the first image. Make it look realistic, retaining the person\'s features and pose. Ensure the clothing fits naturally.' };
+
+                const response = await ai.models.generateContent({
+                    model: VIRTUAL_TRY_ON_MODEL,
+                    contents: { parts: [personImagePart, productImagePart, textPart] },
+                    config: {
+                        responseModalities: [Modality.IMAGE],
+                    },
+                });
+
+                const firstPart = response.candidates?.[0]?.content?.parts?.[0];
+                if (firstPart && 'inlineData' in firstPart && firstPart.inlineData) {
+                    const resultImageBase64 = firstPart.inlineData.data;
+                    const mimeType = firstPart.inlineData.mimeType;
+                    const resultImage = `data:${mimeType};base64,${resultImageBase64}`;
+                    return res.status(200).json({ resultImage });
+                }
+                throw new Error('No image data found in response');
+            }
+
+            case 'generateCreativeStrategy': {
+                const { topic, photoCount, videoCount } = payload;
+                const prompt = `You are a creative director for a marketing campaign. The campaign topic is: "${topic}". Generate a list of ${photoCount} creative and detailed photo prompts and ${videoCount} creative and detailed video prompts for this campaign. The prompts should be suitable for a generative AI model. Return the result as a JSON object with two keys: "photoPrompts" and "videoPrompts", which are arrays of strings.`;
+
+                const response = await ai.models.generateContent({
+                    model: TEXT_MODEL,
+                    contents: prompt,
+                    config: {
+                        responseMimeType: 'application/json',
+                        responseSchema: {
+                            type: Type.OBJECT,
+                            properties: {
+                                photoPrompts: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                videoPrompts: { type: Type.ARRAY, items: { type: Type.STRING } },
+                            },
+                            required: ['photoPrompts', 'videoPrompts'],
+                        },
+                    },
+                });
+                return res.status(200).json(JSON.parse(response.text));
+            }
+
+            case 'generateMetadataForAsset': {
+                const metadata = await handleGenerateMetadataForAsset(payload);
+                return res.status(200).json(metadata);
+            }
+
+            case 'generateStockImage': {
+                const { prompt, aspectRatio, generateMetadata } = payload;
+
+                const imageResponse = await ai.models.generateImages({
+                    model: STOCK_PHOTO_MODEL,
+                    prompt: prompt,
+                    config: {
+                        numberOfImages: 1,
+                        aspectRatio: aspectRatio,
+                        outputMimeType: 'image/png',
+                    },
+                });
+                
+                const base64ImageBytes = imageResponse.generatedImages[0].image.imageBytes;
+                const src = `data:image/png;base64,${base64ImageBytes}`;
+
+                let metadata;
+                if (generateMetadata) {
+                    metadata = await handleGenerateMetadataForAsset({ prompt, type: 'photo' });
+                }
+
+                return res.status(200).json({ src, metadata });
+            }
+
+            case 'generatePhotoShootPackage': {
+                const { aspectRatio } = payload;
+                const themePrompt = `You are a creative director for a photo shoot. Generate a cohesive theme for a set of 10 stock photos. The theme should be specific and evocative. Then, generate 10 distinct, detailed, and creative image prompts based on that theme. The prompts should be suitable for a generative AI model like Imagen. Return the result as a JSON object with two keys: "theme" (a string) and "prompts" (an array of 10 strings).`;
+
+                const themeResponse = await ai.models.generateContent({
+                    model: ADVANCED_TEXT_MODEL,
+                    contents: themePrompt,
+                    config: {
+                        responseMimeType: 'application/json',
+                        responseSchema: {
+                            type: Type.OBJECT,
+                            properties: {
+                                theme: { type: Type.STRING },
+                                prompts: { type: Type.ARRAY, items: { type: Type.STRING } },
+                            },
+                            required: ['theme', 'prompts'],
+                        },
+                    },
+                });
+
+                const { theme, prompts } = JSON.parse(themeResponse.text);
+
+                const imagePromises = (prompts as string[]).map(prompt =>
+                    ai.models.generateImages({
+                        model: STOCK_PHOTO_MODEL,
+                        prompt,
+                        config: {
+                            numberOfImages: 1,
+                            aspectRatio,
+                            outputMimeType: 'image/png',
+                        },
+                    }).catch(e => {
+                        console.error(`Image generation failed for prompt: "${prompt}"`, e);
+                        return { error: true, prompt };
+                    })
+                );
+
+                const imageGenResults = await Promise.all(imagePromises);
+
+                const results = imageGenResults.map((result: any, i) => {
+                    if (result.error) {
+                        return { id: `img-${i}`, prompt: result.prompt, src: null };
+                    }
+                    const base64ImageBytes = result.generatedImages[0].image.imageBytes;
+                    return {
+                        id: `img-${i}`,
+                        prompt: prompts[i],
+                        src: `data:image/png;base64,${base64ImageBytes}`,
+                    };
+                });
+
+                return res.status(200).json({ theme, results });
+            }
+
+            case 'generateVideo': {
+                const { prompt, aspectRatio } = payload;
+                const operation = await ai.models.generateVideos({
+                    model: VIDEO_GENERATION_MODEL,
+                    prompt: prompt,
+                    config: {
+                        numberOfVideos: 1,
+                        resolution: '1080p',
+                        aspectRatio: aspectRatio,
+                    },
+                });
+                return res.status(200).json(operation);
+            }
+
+            case 'checkVideoOperationStatus': {
+                const { operationName } = payload;
+                const operation = await ai.operations.getVideosOperation({ name: operationName });
+                return res.status(200).json(operation);
+            }
+
+            case 'fetchVideo': {
+                const { uri } = payload;
+                const apiKey = process.env.API_KEY;
+                const fetchUrl = `${uri}&key=${apiKey}`;
+                
+                const response = await fetch(fetchUrl);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Failed to fetch video from URI: ${response.status} ${response.statusText}. Response: ${errorText}`);
+                }
+                const videoBuffer = await response.arrayBuffer();
+                const videoBytes = Buffer.from(videoBuffer).toString('base64');
+                return res.status(200).json({ videoBytes });
+            }
+
+            case 'generateCreativePrompt': {
+                const { type } = payload;
+                let subject = '';
+                switch (type) {
+                    case 'photo': subject = 'a visually stunning, high-quality, professional stock photo'; break;
+                    case 'video': subject = 'a short, cinematic video clip (5-7 seconds)'; break;
+                    case 'campaign': subject = 'a marketing campaign concept for a fictional brand. The concept should be just a few words, like "Urban Oasis" or "Retro Future".'; break;
+                    default: return res.status(400).json({ error: 'Invalid prompt type' });
+                }
+
+                const prompt = `You are a creative director. Generate a creative and concise prompt for ${subject}. The prompt should be specific and evocative, suitable for a generative AI. For a campaign, just return the concept topic. For photo/video, return a detailed art direction prompt. Return only the prompt string, with no extra text or quotation marks.`;
+
+                const response = await ai.models.generateContent({
+                    model: TEXT_MODEL,
+                    contents: prompt,
+                });
+
+                return res.status(200).json({ prompt: response.text.trim() });
+            }
+            
             default:
-                return res.status(400).json({ error: 'Invalid task specified.' });
+                return res.status(400).json({ error: 'Invalid task specified' });
         }
     } catch (error) {
-        console.error(`[gemini-proxy] Error on task '${req.body?.task}':`, error);
-        const errorMessage = error instanceof Error ? error.message : "An unknown internal server error occurred.";
-        return res.status(500).json({ error: errorMessage });
+        console.error('API Error:', error);
+        const message = error instanceof Error ? error.message : 'An unknown server error occurred.';
+        res.status(500).json({ error: message });
     }
 }
