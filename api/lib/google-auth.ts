@@ -1,15 +1,56 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleAuth } from 'google-auth-library';
 
-// Ensure the API key is available. This is a hard requirement.
-if (!process.env.API_KEY) {
-    // This error will be caught by the Vercel runtime and logged.
-    // The client will receive a 500 Internal Server Error.
-    throw new Error("API_KEY environment variable is not set.");
-}
+let authToken: string | null = null;
+let tokenExpiry: Date | null = null;
 
 /**
- * A singleton instance of the GoogleGenAI client.
- * Initialized with the API key from environment variables.
+ * A robust function to get a Google Cloud authentication token.
+ * It caches the token to avoid re-fetching on every request.
+ * It explicitly reads and parses GOOGLE_CREDENTIALS_JSON.
+ * @returns A promise that resolves to the access token string.
  */
-// FIX: Initialize GoogleGenAI with a named apiKey parameter as required by the new SDK versions.
-export const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export async function getAuthToken(): Promise<string> {
+    if (authToken && tokenExpiry && new Date() < tokenExpiry) {
+        return authToken;
+    }
+
+    const credentialsJsonString = process.env.GOOGLE_CREDENTIALS_JSON;
+    if (!credentialsJsonString) {
+        throw new Error("GOOGLE_CREDENTIALS_JSON environment variable is not set or empty.");
+    }
+
+    let credentials;
+    try {
+        credentials = JSON.parse(credentialsJsonString);
+    } catch (error) {
+        throw new Error("Failed to parse GOOGLE_CREDENTIALS_JSON. Please ensure it's a valid JSON string.");
+    }
+    
+    const auth = new GoogleAuth({
+        credentials,
+        scopes: 'https://www.googleapis.com/auth/cloud-platform',
+    });
+
+    try {
+        const client = await auth.getClient();
+        const tokenResponse = await client.getAccessToken();
+
+        // FIX: Add safety check for token response.
+        if (!tokenResponse.token) {
+            throw new Error("Failed to retrieve access token from Google Auth Library.");
+        }
+
+        authToken = tokenResponse.token;
+        // Set expiry to 5 minutes before the actual expiry for safety margin
+        tokenExpiry = new Date(new Date().getTime() + 55 * 60 * 1000); 
+        
+        return authToken;
+
+    } catch (error) {
+        // Invalidate cache on failure
+        authToken = null;
+        tokenExpiry = null;
+        console.error("Error fetching Google Auth Token:", error);
+        throw new Error(`Failed to get Google Auth Token: ${error instanceof Error ? error.message : 'Unknown auth error'}`);
+    }
+}
