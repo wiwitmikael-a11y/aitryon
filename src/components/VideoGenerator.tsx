@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { generateVideo, checkVideoOperationStatus, fetchAndCreateVideoUrl } from '../services/geminiService';
-import ImageUploader from './ImageUploader';
+import { generateVideo, checkVideoOperationStatus, fetchAndCreateVideoUrl, generateCreativePrompt } from '../services/geminiService';
 import { SpinnerIcon } from './icons/SpinnerIcon';
 import { VideoIcon } from './icons/VideoIcon';
 import { VideoGeneratorIcon } from './icons/VideoGeneratorIcon';
@@ -8,18 +7,34 @@ import { VideoGeneratorIcon } from './icons/VideoGeneratorIcon';
 const POLLING_INTERVAL = 10000; // 10 seconds
 
 const VideoGenerator: React.FC = () => {
-    const [prompt, setPrompt] = useState('');
-    const [image, setImage] = useState<string | null>(null);
+    const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
     const [videoSrc, setVideoSrc] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState('Starting video generation...');
     const [error, setError] = useState<string | null>(null);
     const [operationName, setOperationName] = useState<string | null>(null);
-
+    const [isKeySelected, setIsKeySelected] = useState(false);
+    const [aiPrompt, setAiPrompt] = useState('');
     const pollingRef = useRef<number | null>(null);
 
+    useEffect(() => {
+        const checkKey = async () => {
+            if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
+                setIsKeySelected(true);
+            }
+        };
+        checkKey();
+    }, []);
+
+    const handleSelectKey = async () => {
+        if (window.aistudio) {
+            await window.aistudio.openSelectKey();
+            setIsKeySelected(true);
+        }
+    };
+
     const loadingMessages = [
-        "Initializing hyper-dimensional film reels...",
+        "AI is writing a cinematic script...",
         "Syncing with the cinematic universe...",
         "Teaching AI about the rule of thirds...",
         "Rendering pixel-perfect popcorn...",
@@ -31,6 +46,7 @@ const VideoGenerator: React.FC = () => {
         let messageInterval: number;
         if (isLoading) {
             let i = 0;
+            setLoadingMessage(loadingMessages[0]);
             messageInterval = window.setInterval(() => {
                 i = (i + 1) % loadingMessages.length;
                 setLoadingMessage(loadingMessages[i]);
@@ -39,7 +55,7 @@ const VideoGenerator: React.FC = () => {
         return () => {
             if (messageInterval) clearInterval(messageInterval);
         };
-    }, [isLoading, loadingMessages]);
+    }, [isLoading]);
 
 
     const pollStatus = async (opName: string) => {
@@ -64,7 +80,13 @@ const VideoGenerator: React.FC = () => {
             if (pollingRef.current) clearInterval(pollingRef.current);
             setOperationName(null);
             setIsLoading(false);
-            setError(err instanceof Error ? err.message : 'Failed to poll for video status.');
+            const errorMessage = err instanceof Error ? err.message : 'Failed to poll for video status.';
+            if (errorMessage.includes("Requested entity was not found")) {
+                setError("API Key error. Please re-select your key and try again.");
+                setIsKeySelected(false);
+            } else {
+                setError(errorMessage);
+            }
         }
     };
     
@@ -80,77 +102,100 @@ const VideoGenerator: React.FC = () => {
     }, [operationName]);
 
     const handleGenerate = async () => {
-        if (!prompt.trim()) {
-            setError('Please enter a prompt.');
-            return;
-        }
         setIsLoading(true);
         setError(null);
         setVideoSrc(null);
-        setLoadingMessage('Starting video generation...');
+        setAiPrompt('');
         if (pollingRef.current) clearInterval(pollingRef.current);
 
         try {
-            let imagePayload;
-            if (image) {
-                const [header, base64Data] = image.split(',');
-                const mimeType = header.match(/:(.*?);/)?.[1] || 'image/png';
-                imagePayload = { imageBytes: base64Data, mimeType };
-            }
+            setLoadingMessage("AI is brainstorming a cinematic scene...");
+            const { prompt } = await generateCreativePrompt('video');
+            setAiPrompt(prompt);
+            setLoadingMessage("Directing and rendering the scene... This may take a few minutes.");
 
-            const operation = await generateVideo(prompt, imagePayload);
+            const operation = await generateVideo(prompt, aspectRatio);
             if (!operation.name) throw new Error("Video operation name not found.");
             
             setOperationName(operation.name);
-            setLoadingMessage('Video generation in progress...');
-
+            
         } catch (err) {
             setIsLoading(false);
-            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+            if (errorMessage.includes("API key not valid")) {
+                setError("API Key error. Please re-select your key and try again.");
+                setIsKeySelected(false);
+            } else {
+                setError(errorMessage);
+            }
         }
     };
-    
-    const canGenerate = prompt.trim() && !isLoading;
+        
+    if (!isKeySelected) {
+        return (
+            <div className="bg-slate-900/50 p-8 rounded-2xl shadow-lg border border-slate-800 text-center max-w-2xl mx-auto">
+                <h2 className="text-2xl font-bold text-cyan-400 mb-4">API Key Required</h2>
+                <p className="text-slate-300 mb-6">The Cinematic Video Director uses advanced models that require you to select your own API key for billing purposes. Please select a key to continue.</p>
+                <p className="text-xs text-slate-500 mb-6">For more information, please see the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">billing documentation</a>.</p>
+                <button onClick={handleSelectKey} className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-6 rounded-full text-lg transition-colors">Select API Key</button>
+                 {error && <p className="text-red-400 mt-4">{error}</p>}
+            </div>
+        )
+    }
 
     return (
         <div className="space-y-8">
+             <div className="text-center max-w-3xl mx-auto">
+                <h1 className="text-3xl font-bold text-white mb-2">Cinematic Video Director</h1>
+                <p className="text-lg text-slate-400">The AI will imagine a complete cinematic scene and generate a stunning, 1080p video. Just select an orientation and let the AI do the rest.</p>
+            </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6">
-                    <h2 className="text-2xl font-bold text-cyan-400">Video Prompt</h2>
-                    <div>
-                        <label className="block text-slate-300 font-semibold mb-2">Describe the video you want to create:</label>
-                        <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="e.g., 'A majestic eagle soaring over a misty mountain range at sunrise, cinematic, 4k.'" className="w-full h-32 p-3 bg-slate-700/50 border border-slate-600 rounded-lg"/>
+                <div className="bg-slate-900/50 p-6 rounded-2xl shadow-lg flex flex-col justify-center gap-6 border border-slate-800">
+                     <div>
+                        <label htmlFor="aspect-ratio-video" className="block text-slate-300 font-semibold mb-2 text-center text-lg">1. Select Orientation</label>
+                        <select id="aspect-ratio-video" value={aspectRatio} onChange={e => setAspectRatio(e.target.value as any)} className="w-full bg-slate-800 border border-slate-700 p-3 rounded-lg focus:ring-2 focus:ring-cyan-500 transition-colors text-lg">
+                            <option value="16:9">16:9 (Landscape)</option>
+                            <option value="9:16">9:16 (Portrait)</option>
+                        </select>
                     </div>
-                    <div>
-                        <ImageUploader label="Optional: Starting Image" onImageUpload={base64 => setImage(base64)} initialImage={image} />
-                    </div>
-                     <button onClick={handleGenerate} disabled={!canGenerate} className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-bold py-4 px-8 rounded-full text-lg shadow-lg flex items-center justify-center gap-2">
-                        {isLoading ? 'Generating...' : <> <VideoGeneratorIcon /> Generate Video </>}
+                     <button onClick={handleGenerate} disabled={isLoading} className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-400 text-white font-bold py-4 px-8 rounded-full text-xl shadow-lg flex items-center justify-center gap-2">
+                        {isLoading ? 'Generating...' : <> <VideoGeneratorIcon /> 2. Generate Video </>}
                     </button>
                 </div>
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg flex items-center justify-center min-h-[400px]">
+                <div className="bg-slate-900/50 p-6 rounded-2xl shadow-lg flex flex-col items-center justify-center min-h-[400px] lg:min-h-full border border-slate-800">
                     {isLoading && (
-                        <div className="text-center">
+                        <div className="text-center w-full">
                             <SpinnerIcon />
                             <p className="text-slate-300 mt-4 text-lg">Generating Video</p>
-                            <p className="text-slate-400 mt-2 text-sm">{loadingMessage}</p>
+                             <div className="w-full bg-slate-700 rounded-full h-2.5 mt-4 overflow-hidden">
+                                <div className="bg-cyan-500 h-2.5 rounded-full animate-pulse" style={{width: '100%'}}></div>
+                            </div>
+                            <p className="text-slate-400 mt-2 text-sm h-4">{loadingMessage}</p>
+                            {aiPrompt && <p className="text-xs text-slate-500 mt-4 italic">Concept: "{aiPrompt}"</p>}
                         </div>
                     )}
                     {error && (
-                        <div className="text-center bg-red-900/20 p-4 rounded-lg">
-                            <p className="text-red-400 font-semibold">An Error Occurred</p>
-                            <p className="text-slate-300 mt-2 text-sm">{error}</p>
+                        <div className="text-center bg-red-900/20 p-4 rounded-lg border border-red-500/30">
+                            <p className="text-red-300 font-semibold">An Error Occurred</p>
+                            <p className="text-slate-400 mt-2 text-sm">{error}</p>
                         </div>
                     )}
                     {videoSrc && (
-                        <div className="w-full">
+                        <div className="w-full space-y-4">
                              <video src={videoSrc} controls autoPlay loop className="w-full rounded-lg shadow-2xl" />
+                             <div className="p-4 bg-slate-800/70 rounded-lg border border-slate-700">
+                                <h4 className="font-semibold text-cyan-400 mb-2">AI Cinematic Direction:</h4>
+                                <p className="text-sm text-slate-300 italic">"{aiPrompt}"</p>
+                            </div>
+                             <a href={videoSrc} download="ai-cinematic-video.mp4" className="w-full block text-center bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-full transition-colors">
+                                Download Video
+                            </a>
                         </div>
                     )}
                     {!isLoading && !error && !videoSrc && (
-                        <div className="text-center text-slate-500">
+                        <div className="text-center text-slate-600">
                             <VideoIcon />
-                            <p className="mt-4">Your generated video will appear here.</p>
+                            <p className="mt-4 text-slate-400">Your generated video will appear here.</p>
                         </div>
                     )}
                 </div>

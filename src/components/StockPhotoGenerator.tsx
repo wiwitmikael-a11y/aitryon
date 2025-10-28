@@ -1,175 +1,101 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { generateStockImage, startBatchImageJob, checkBatchImageJobStatus } from '../services/geminiService';
+import React, { useState } from 'react';
+import { generateStockImage, generateCreativePrompt } from '../services/geminiService';
 import type { StockImageResult } from '../services/geminiService';
-import type { BatchJob } from '../types';
 import { SpinnerIcon } from './icons/SpinnerIcon';
-import { ArtDirectorIcon } from './icons/ArtDirectorIcon';
-import { SearchIcon } from './icons/SearchIcon';
-
-type Mode = 'single' | 'batch';
-const BATCH_POLLING_INTERVAL = 5000; // 5 seconds
+import { GenerateIcon } from './icons/GenerateIcon';
 
 const StockPhotoGenerator: React.FC = () => {
-    const [mode, setMode] = useState<Mode>('single');
+    const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('16:9');
+    const [result, setResult] = useState<StockImageResult | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [loadingMessage, setLoadingMessage] = useState('');
+    const [error, setError] = useState<string | null>(null);
+    const [aiPrompt, setAiPrompt] = useState('');
 
-    // Single mode state
-    const [prompt, setPrompt] = useState('');
-    const [aspectRatio, setAspectRatio] = useState<'1:1' | '16:9' | '9:16'>('16:9');
-    const [singleResult, setSingleResult] = useState<StockImageResult | null>(null);
-    const [isSingleLoading, setIsSingleLoading] = useState(false);
-    const [singleError, setSingleError] = useState<string | null>(null);
-
-    // Batch mode state
-    const [batchTopic, setBatchTopic] = useState('');
-    const [batchCount, setBatchCount] = useState(4);
-    const [batchJob, setBatchJob] = useState<BatchJob | null>(null);
-    const [isBatchLoading, setIsBatchLoading] = useState(false);
-    const [batchError, setBatchError] = useState<string | null>(null);
-    const batchPollingRef = useRef<number | null>(null);
-
-    const handleGenerateSingle = async () => {
-        if (!prompt.trim()) return;
-        setIsSingleLoading(true);
-        setSingleError(null);
-        setSingleResult(null);
+    const handleGenerate = async () => {
+        setIsLoading(true);
+        setError(null);
+        setResult(null);
+        setAiPrompt('');
         try {
-            const result = await generateStockImage(prompt, aspectRatio, true);
-            setSingleResult(result);
+            setLoadingMessage("AI is brainstorming a creative concept...");
+            const { prompt } = await generateCreativePrompt('photo');
+            setAiPrompt(prompt);
+            
+            setLoadingMessage("Generating image from AI's direction...");
+            const imageResult = await generateStockImage(prompt, aspectRatio, true);
+            setResult(imageResult);
         } catch (err) {
-            setSingleError(err instanceof Error ? err.message : 'An unknown error occurred.');
+            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
         } finally {
-            setIsSingleLoading(false);
+            setIsLoading(false);
+            setLoadingMessage('');
         }
     };
-
-    const handleGenerateBatch = async () => {
-        if (!batchTopic.trim()) return;
-        setIsBatchLoading(true);
-        setBatchError(null);
-        setBatchJob(null);
-        if (batchPollingRef.current) clearInterval(batchPollingRef.current);
-
-        try {
-            // In a real app, this prompt generation would be a separate Gemini call.
-            // For simplicity here, we generate simple prompts based on the topic.
-            const prompts = Array.from({ length: batchCount }, (_, i) => `${batchTopic}, high quality professional stock photo, style ${i + 1}`);
-
-            const { jobId } = await startBatchImageJob(prompts);
-            // Initialize job state for the UI
-            setBatchJob({ 
-                id: jobId, 
-                status: 'PENDING', 
-                prompts, 
-                results: prompts.map((p, i) => ({ id: `image-${i}`, prompt: p, status: 'pending' })),
-                createdAt: Date.now() 
-            });
-            batchPollingRef.current = window.setInterval(() => pollBatchStatus(jobId), BATCH_POLLING_INTERVAL);
-        } catch (err) {
-            setBatchError(err instanceof Error ? err.message : 'Failed to start batch job.');
-            setIsBatchLoading(false);
+    
+    const handleDownload = () => {
+        if (result?.src) {
+          const link = document.createElement('a');
+          link.href = result.src;
+          link.download = `ai-art-director-result.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
         }
-    };
-
-    const pollBatchStatus = async (jobId: string) => {
-        try {
-            const job = await checkBatchImageJobStatus(jobId);
-            setBatchJob(job);
-            if (job.status === 'COMPLETED' || job.status === 'FAILED') {
-                if (batchPollingRef.current) clearInterval(batchPollingRef.current);
-                setIsBatchLoading(false);
-                if (job.status === 'FAILED') {
-                    setBatchError(job.error || 'Batch job failed for an unknown reason.');
-                }
-            }
-        } catch (err) {
-            if (batchPollingRef.current) clearInterval(batchPollingRef.current);
-            setIsBatchLoading(false);
-            setBatchError(err instanceof Error ? err.message : 'Failed to poll job status.');
-        }
-    };
-
-    useEffect(() => {
-        return () => {
-            if (batchPollingRef.current) clearInterval(batchPollingRef.current);
-        };
-    }, []);
-
-    const renderBatchResults = () => {
-        if (!batchJob) return <p className="text-slate-500 text-center">Batch generation results will appear here.</p>;
-        
-        return (
-             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {batchJob.results.map(item => (
-                    <div key={item.id} className="aspect-video bg-slate-900/50 rounded-lg flex items-center justify-center p-2 relative overflow-hidden">
-                        {item.status === 'complete' && item.src && <img src={item.src} alt={item.prompt} className="w-full h-full object-cover" />}
-                        {(item.status === 'pending' || item.status === 'generating') && <SpinnerIcon />}
-                        {item.status === 'failed' && <p className="text-red-400 text-xs text-center" title={item.error}>Failed</p>}
-                    </div>
-                ))}
-            </div>
-        )
-    }
+      };
 
     return (
         <div className="space-y-8">
-            <div className="flex justify-center bg-slate-800/50 p-1 rounded-full max-w-sm mx-auto">
-                <button onClick={() => setMode('single')} className={`w-1/2 py-2 rounded-full font-semibold transition-colors ${mode === 'single' ? 'bg-cyan-500 text-white' : 'hover:bg-slate-700'}`}>Art Director</button>
-                <button onClick={() => setMode('batch')} className={`w-1/2 py-2 rounded-full font-semibold transition-colors ${mode === 'batch' ? 'bg-cyan-500 text-white' : 'hover:bg-slate-700'}`}>Batch Generation</button>
+             <div className="text-center max-w-3xl mx-auto">
+                <h1 className="text-3xl font-bold text-white mb-2">AI Art Director</h1>
+                <p className="text-lg text-slate-400">Let the AI generate a complete, professional art direction and create a stunning, high-resolution image from it. Just choose your orientation and click generate.</p>
             </div>
-
-            {mode === 'single' && (
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                    <h2 className="text-2xl font-bold text-cyan-400 mb-4">Art Director Mode</h2>
-                    <p className="text-slate-400 mb-4">Provide a detailed prompt for precise image generation.</p>
-                    <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="e.g., A cinematic, photorealistic shot of a lone astronaut looking at a swirling nebula, high-resolution, detailed suit..." className="w-full h-24 p-3 bg-slate-700/50 border border-slate-600 rounded-lg"/>
-                    <div className="flex items-center gap-4 my-4">
-                        <label className="text-slate-300">Aspect Ratio:</label>
-                        <select value={aspectRatio} onChange={e => setAspectRatio(e.target.value as any)} className="bg-slate-700/50 border border-slate-600 p-2 rounded-lg">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-slate-900/50 p-6 rounded-2xl shadow-lg border border-slate-800 flex flex-col justify-center gap-6">
+                    <div>
+                        <label htmlFor="aspect-ratio" className="block text-slate-300 font-semibold mb-2 text-center text-lg">1. Select Orientation</label>
+                        <select id="aspect-ratio" value={aspectRatio} onChange={e => setAspectRatio(e.target.value as any)} className="w-full bg-slate-800 border border-slate-700 p-3 rounded-lg focus:ring-2 focus:ring-cyan-500 transition-colors text-lg">
                             <option value="16:9">16:9 (Landscape)</option>
                             <option value="9:16">9:16 (Portrait)</option>
                             <option value="1:1">1:1 (Square)</option>
                         </select>
                     </div>
-                    <button onClick={handleGenerateSingle} disabled={isSingleLoading || !prompt.trim()} className="w-full flex items-center justify-center bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg">
-                        {isSingleLoading ? <SpinnerIcon /> : <><ArtDirectorIcon /> <span className="ml-2">Generate Image</span></>}
+                    <button onClick={handleGenerate} disabled={isLoading} className="w-full flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-400 text-white font-bold py-4 px-6 rounded-full text-xl transition-colors">
+                        {isLoading ? <SpinnerIcon /> : <><GenerateIcon /> <span>2. Generate Image</span></>}
                     </button>
-                    {singleError && <p className="text-red-400 mt-4 text-center">{singleError}</p>}
-                    {singleResult && (
-                        <div className="mt-6">
-                            <h3 className="text-xl font-bold mb-4">Result:</h3>
-                            <img src={singleResult.src} alt={prompt} className="rounded-lg w-full" />
-                            {singleResult.metadata && (
-                                <div className="mt-4 p-4 bg-slate-900/50 rounded-lg">
-                                    <h4 className="font-semibold text-slate-200">Generated Metadata:</h4>
-                                    <p><strong>Title:</strong> {singleResult.metadata.title}</p>
-                                    <p><strong>Description:</strong> {singleResult.metadata.description}</p>
-                                    <p><strong>Tags:</strong> {singleResult.metadata.tags.join(', ')}</p>
+                </div>
+                <div className="bg-slate-900/50 p-6 rounded-2xl shadow-lg border border-slate-800 flex flex-col">
+                    <h2 className="text-xl font-bold text-cyan-400 mb-4">Result</h2>
+                    <div className="flex-grow flex items-center justify-center">
+                        {isLoading && (
+                            <div className="text-center">
+                                <SpinnerIcon />
+                                <p className="text-slate-300 mt-4">{loadingMessage}</p>
+                            </div>
+                        )}
+                        {error && <p className="text-red-400 text-center">{error}</p>}
+                        {result ? (
+                            <div className="space-y-4 w-full">
+                                <img src={result.src} alt={aiPrompt} className="rounded-lg w-full shadow-lg" />
+                                <div className="p-4 bg-slate-800/70 rounded-lg border border-slate-700">
+                                    <h4 className="font-semibold text-cyan-400 mb-2">AI Art Direction:</h4>
+                                    <p className="text-sm text-slate-300 italic">"{aiPrompt}"</p>
                                 </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            )}
-
-             {mode === 'batch' && (
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg space-y-4">
-                    <h2 className="text-2xl font-bold text-cyan-400">Batch Generation Mode</h2>
-                    <p className="text-slate-400">Provide a topic, and the AI will generate a series of images.</p>
-                    <input type="text" value={batchTopic} onChange={e => setBatchTopic(e.target.value)} placeholder="e.g., 'Minimalist home office setups'" className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg" />
-                    <div>
-                        <label htmlFor="batch-count" className="text-slate-300">Number of Images:</label>
-                        <input id="batch-count" type="number" value={batchCount} onChange={e => setBatchCount(Number(e.target.value))} min="2" max="8" className="w-full p-2 bg-slate-700/50 border border-slate-600 rounded-lg mt-1" />
-                    </div>
-                    <button onClick={handleGenerateBatch} disabled={isBatchLoading || !batchTopic.trim()} className="w-full flex items-center justify-center bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg">
-                        {isBatchLoading ? <SpinnerIcon /> : <><SearchIcon /> <span className="ml-2">Start Batch Job</span></>}
-                    </button>
-                    {batchError && <p className="text-red-400 mt-4 text-center">{batchError}</p>}
-                    <div className="mt-6">
-                        <h3 className="text-xl font-bold mb-4">Batch Results: {batchJob?.status}</h3>
-                        {renderBatchResults()}
+                                {result.metadata && (
+                                     <div className="p-4 bg-slate-800/70 rounded-lg border border-slate-700 text-sm">
+                                         <p><strong className="text-slate-300">Title:</strong> {result.metadata.title}</p>
+                                         <p><strong className="text-slate-300">Description:</strong> {result.metadata.description}</p>
+                                         <p><strong className="text-slate-300">Tags:</strong> {result.metadata.tags.join(', ')}</p>
+                                     </div>
+                                )}
+                                <button onClick={handleDownload} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-full transition-colors">
+                                    Download Image
+                                </button>
+                            </div>
+                        ) : !isLoading && !error && <p className="text-slate-500 text-center py-8">Your generated image and metadata will appear here.</p>}
                     </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 };

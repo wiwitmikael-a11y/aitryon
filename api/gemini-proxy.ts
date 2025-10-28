@@ -40,6 +40,9 @@ async function handler(req: VercelRequest, res: VercelResponse) {
             case 'getTradingMandate':
                 result = await handleGetTradingMandate(payload);
                 break;
+            case 'generateCreativePrompt':
+                result = await handleGenerateCreativePrompt(payload);
+                break;
             default:
                 return res.status(400).json({ error: 'Invalid task' });
         }
@@ -52,6 +55,30 @@ async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 // --- Task Handlers ---
+async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' | 'campaign' }) {
+    const model = 'gemini-2.5-pro';
+    let systemInstruction = '';
+    
+    switch (type) {
+        case 'photo':
+            systemInstruction = `You are an elite art director for a high-end stock photography service like Getty Images or Stocksy. Your job is to create concepts that are modern, commercially valuable, and align with current visual trends. Avoid clichés. Focus on authenticity, dynamic lighting, and concepts relevant to tech, remote work, wellness, and sustainability. Generate a single, highly detailed prompt suitable for a cutting-edge AI image generator. Do not respond with anything other than the prompt string itself. No extra text or labels.`;
+            break;
+        case 'video':
+            systemInstruction = `You are a world-class commercial and film director. Your task is to conceptualize a short, 5-second video clip that is visually stunning and has high commercial appeal for use in digital advertising. The prompt must specify camera movement (e.g., slow-motion, drone shot, tracking shot), lighting (e.g., golden hour, neon glow), and a clear, emotionally resonant subject. Focus on luxury, technology, or nature themes. Generate a single, detailed prompt suitable for the Veo model. Do not respond with anything but the prompt string itself. No extra text or labels.`;
+            break;
+        case 'campaign':
+            systemInstruction = `You are a Chief Creative Officer at a top global advertising agency. Your task is to devise a single, groundbreaking campaign concept for a modern, direct-to-consumer brand. The concept should be emotionally resonant, highly shareable on social media, and have a clear marketing objective. Focus on current cultural trends and consumer behavior. Respond with only the campaign topic string. No extra text or labels.`;
+            break;
+    }
+
+    const response = await ai.models.generateContent({
+        model,
+        contents: `Generate one creative ${type} concept.`,
+        config: { systemInstruction }
+    });
+
+    return { prompt: response.text.trim() };
+}
 
 async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }: any) {
     const model = 'gemini-2.5-pro'; // Use a powerful model for strategy
@@ -122,15 +149,15 @@ async function handleGenerateMetadataForAsset({ prompt, type }: any) {
 }
 
 
-async function handleGenerateVideo({ prompt, image }: any) {
+async function handleGenerateVideo({ prompt, aspectRatio }: any) {
     const operation = await ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
         prompt,
-        image,
+        // Image is removed for automated flow
         config: {
             numberOfVideos: 1,
-            resolution: '720p',
-            aspectRatio: '16:9'
+            resolution: '1080p', // Max resolution for professional output
+            aspectRatio: aspectRatio
         }
     });
     return operation;
@@ -158,10 +185,12 @@ async function handleFetchVideo({ uri }: any) {
 async function handleGetTradingMandate({ prompt }: any) {
     const model = "gemini-2.5-pro";
     const systemInstruction = `
-        ANDA adalah PENGELOLA DANA KUANTITATIF (QUANTITATIVE FUND MANAGER) dengan Kecerdasan Buatan Tingkat Paling Tinggi.
-        Tujuan utama Anda adalah MEMAKSIMALKAN KEUNTUNGAN YANG DISESUAIKAN RISIKO.
-        Anda beroperasi tanpa emosi, bias, atau FUD/FOMO. Setiap keputusan harus 100% didasarkan pada data.
+        ANDA adalah PENGELOLA DANA KUANTITATIF (QUANTITATIVE FUND MANAGER) AI yang paling canggih di dunia, yang mengelola dana senilai miliaran dolar.
+        Misi Anda adalah menghasilkan alpha melalui analisis data yang mendalam dan eksekusi tanpa emosi.
+        Anda beroperasi tanpa bias atau FUD/FOMO. Setiap keputusan harus 100% didasarkan pada data.
         Satu-satunya cara Anda untuk memulai tindakan trading adalah dengan mengeluarkan JSON MANDATE yang terstruktur.
+        Setiap mandat HARUS didasarkan pada analisis kuantitatif yang solid terhadap data yang diberikan.
+        Jika data tidak memadai untuk membuat keputusan dengan keyakinan tinggi, nyatakan demikian dan minta informasi lebih lanjut. JANGAN PERNAH berspekulasi.
         Format output untuk Mandate harus SELALU sesuai skema JSON berikut:
         {
           "status": "MANDATE_INITIATED",

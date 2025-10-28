@@ -39,8 +39,12 @@ export const generateStockImage = async (
     return callGeminiProxy('generateStockImage', { prompt, aspectRatio, generateMetadata });
 };
 
-export const generateVideo = async (prompt: string, image?: { imageBytes: string; mimeType: string; }): Promise<any> => {
-    return callGeminiProxy('generateVideo', { prompt, image });
+export const generateVideo = async (
+    prompt: string, 
+    aspectRatio: '16:9' | '9:16' = '16:9'
+): Promise<any> => {
+    // This function is simplified; image payload is removed for the automated workflow
+    return callGeminiProxy('generateVideo', { prompt, aspectRatio });
 };
 
 export const checkVideoOperationStatus = async (operationName: string): Promise<any> => {
@@ -59,6 +63,14 @@ export const generateMetadataForAsset = async (prompt: string, type: 'photo' | '
 export const getTradingMandate = async (prompt: string): Promise<any> => {
     return callGeminiProxy('getTradingMandate', { prompt });
 };
+
+// New function for automated idea generation
+export const generateCreativePrompt = async (
+    type: 'photo' | 'video' | 'campaign'
+): Promise<{ prompt: string }> => {
+    return callGeminiProxy('generateCreativePrompt', { type });
+};
+
 
 // Batch job services for Stock Photo Generator
 export const startBatchImageJob = async (prompts: string[]): Promise<{ jobId: string }> => {

@@ -10,6 +10,7 @@ import { getCroppedImg } from '../utils/imageUtils';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { InfoIcon } from './icons/InfoIcon';
 import { Area } from 'react-easy-crop';
+import { GenerateIcon } from './icons/GenerateIcon';
 
 const POLLING_INTERVAL = 3000; // 3 seconds
 
@@ -20,7 +21,7 @@ function VirtualTryOn() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [history, setHistory] = useLocalStorage<HistoryItem[]>('vto-history', []);
   
   const [guideShown, setGuideShown] = useLocalStorage('vto-guide-shown', false);
   const [isGuideOpen, setIsGuideOpen] = useState(!guideShown);
@@ -29,24 +30,6 @@ function VirtualTryOn() {
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
 
   const pollingRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    try {
-      const storedHistory = localStorage.getItem('vto-history');
-      if (storedHistory) setHistory(JSON.parse(storedHistory));
-    } catch (e) {
-      console.error("Failed to load history from localStorage", e);
-    }
-  }, []);
-  
-  const saveHistory = (newHistory: HistoryItem[]) => {
-      setHistory(newHistory);
-      try {
-        localStorage.setItem('vto-history', JSON.stringify(newHistory));
-      } catch(e) {
-          console.error("Failed to save history to localStorage", e);
-      }
-  };
 
   const handleJobSuccess = useCallback((job: Job) => {
     if (job.resultImage) {
@@ -57,11 +40,12 @@ function VirtualTryOn() {
         personImage: job.personImage,
         productImage: job.productImage,
       };
-      saveHistory([newHistoryItem, ...history.filter(h => h.id !== job.id)]);
+      // Add new item and prevent duplicates
+      setHistory(prevHistory => [newHistoryItem, ...prevHistory.filter(h => h.id !== job.id)]);
     } else {
       setError("Job completed but no image was returned.");
     }
-  }, [history]);
+  }, [setHistory]);
   
   const pollJobStatus = useCallback(async (id: string) => {
     try {
@@ -131,7 +115,7 @@ function VirtualTryOn() {
   };
 
   const handleDelete = (id: string) => {
-    saveHistory(history.filter(item => item.id !== id));
+    setHistory(history.filter(item => item.id !== id));
   };
   
   const handleCropRequest = (base64: string) => {
@@ -170,41 +154,41 @@ function VirtualTryOn() {
             onCropComplete={handleCropComplete}
         />
       )}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-cyan-400">Upload Your Images</h2>
-             <button onClick={() => setIsGuideOpen(true)} className="flex items-center gap-2 text-slate-300 hover:text-cyan-400 transition-colors">
-              <InfoIcon />
-              <span className="hidden sm:inline">Upload Guide</span>
-            </button>
+      <div className="space-y-8">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+          <div className="lg:col-span-2 bg-slate-900/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6 border border-slate-800">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-bold text-cyan-400">Upload Your Images</h2>
+              <button onClick={() => setIsGuideOpen(true)} className="flex items-center gap-2 text-slate-400 hover:text-cyan-400 transition-colors text-sm">
+                <InfoIcon />
+                <span>Upload Guide</span>
+              </button>
+            </div>
+            <ImageUploader label="1. Person Image" onImageUpload={(base64) => setPersonImage(base64)} initialImage={personImage}/>
+            <ImageUploader label="2. Clothing Item" onImageUpload={(base64) => setProductImage(base64)} onCropRequest={handleCropRequest} initialImage={productImage}/>
+            <div className="pt-4 mt-auto">
+               <button
+                  onClick={handleGenerate}
+                  disabled={!canGenerate}
+                  className="w-full flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed disabled:text-slate-400 text-white font-bold py-3 px-6 rounded-full text-lg shadow-lg shadow-cyan-500/10 transition-all duration-300 transform hover:scale-105 disabled:scale-100 disabled:shadow-none"
+              >
+                  <GenerateIcon />
+                  {isLoading ? 'Generating...' : 'Perform Virtual Try-On'}
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <ImageUploader label="Person Image" onImageUpload={(base64) => setPersonImage(base64)} initialImage={personImage}/>
-            <ImageUploader label="Clothing Item" onImageUpload={(base64) => setProductImage(base64)} onCropRequest={handleCropRequest} initialImage={productImage}/>
-          </div>
-        </div>
 
-        <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-           <h2 className="text-2xl font-bold text-cyan-400 mb-6">Generated Result</h2>
-          <ResultDisplay
-            generatedImage={generatedImage}
-            isLoading={isLoading}
-            error={error}
-          />
+          <div className="lg:col-span-3 bg-slate-900/50 p-6 rounded-2xl shadow-lg border border-slate-800">
+            <h2 className="text-xl font-bold text-cyan-400 mb-6">3. Generated Result</h2>
+            <ResultDisplay
+              generatedImage={generatedImage}
+              isLoading={isLoading}
+              error={error}
+            />
+          </div>
         </div>
-      </div>
       
-      <HistoryGallery history={history} onReuse={handleReuse} onDelete={handleDelete} />
-
-      <div className="sticky bottom-0 left-0 right-0 -mx-4 md:-mx-8 mt-8 p-4 bg-slate-900/80 backdrop-blur-sm border-t border-slate-700/50 flex justify-center">
-          <button
-              onClick={handleGenerate}
-              disabled={!canGenerate}
-              className="w-full max-w-md bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-bold py-4 px-8 rounded-full text-lg shadow-lg shadow-cyan-500/20 transition-all duration-300 transform hover:scale-105 disabled:scale-100 disabled:shadow-none"
-          >
-              {isLoading ? 'Generating...' : '✨ Perform Virtual Try-On'}
-          </button>
+        <HistoryGallery history={history} onReuse={handleReuse} onDelete={handleDelete} />
       </div>
     </>
   );

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 
-function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T) => void] {
+// FIX: Update the return type to allow a function updater for the setter, matching React.useState behavior.
+function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void] {
   // Get from local storage then
   // parse stored json or return initialValue
   const readValue = (): T => {
@@ -18,7 +19,8 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T) => voi
 
   const [storedValue, setStoredValue] = useState<T>(readValue);
 
-  const setValue = (value: T) => {
+  // FIX: Update the parameter type to allow a function updater.
+  const setValue = (value: T | ((val: T) => T)) => {
     if (typeof window == 'undefined') {
       console.warn(
         `Tried setting localStorage key “${key}” even though environment is not a client`,

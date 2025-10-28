@@ -5,9 +5,10 @@ import VirtualTryOn from './components/VirtualTryOn';
 import StockPhotoGenerator from './components/StockPhotoGenerator';
 import VideoGenerator from './components/VideoGenerator';
 import CreativeDirector from './components/CreativeDirector';
+import QuantitativeFundManager from './components/QuantitativeFundManager';
 import Footer from './components/Footer';
 
-export type Tool = 'dashboard' | 'try-on' | 'stock-photo' | 'video-generator' | 'creative-director';
+export type Tool = 'dashboard' | 'try-on' | 'stock-photo' | 'video-generator' | 'creative-director' | 'quant-manager';
 
 function App() {
   const [activeTool, setActiveTool] = useState<Tool>('dashboard');
@@ -22,6 +23,8 @@ function App() {
         return <VideoGenerator />;
       case 'creative-director':
         return <CreativeDirector />;
+      case 'quant-manager':
+        return <QuantitativeFundManager />;
       case 'dashboard':
       default:
         return <Dashboard onSelectTool={setActiveTool} />;
@@ -29,15 +32,18 @@ function App() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-900 text-slate-200 font-sans">
-      <Header 
-        activeTool={activeTool}
-        onNavigateHome={() => setActiveTool('dashboard')} 
-      />
-      <main className="flex-grow container mx-auto p-4 md:p-8">
-        {renderTool()}
-      </main>
-      <Footer />
+    <div className="flex flex-col min-h-screen bg-slate-950 text-slate-200 font-sans relative">
+      <div className="absolute inset-0 bg-grid-pattern z-0"></div>
+      <div className="relative z-10 flex flex-col min-h-screen">
+        <Header 
+          activeTool={activeTool}
+          onNavigateHome={() => setActiveTool('dashboard')} 
+        />
+        <main className="flex-grow container mx-auto px-4 py-8 md:py-12">
+          {renderTool()}
+        </main>
+        <Footer />
+      </div>
     </div>
   );
 }

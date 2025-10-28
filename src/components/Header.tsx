@@ -13,11 +13,12 @@ const Header: React.FC<HeaderProps> = ({ activeTool, onNavigateHome }) => {
     'try-on': 'Virtual Try-On',
     'stock-photo': 'AI Art Director',
     'video-generator': 'Cinematic Video Director',
-    'creative-director': 'AI Creative Director'
+    'creative-director': 'AI Creative Director',
+    'quant-manager': 'AI Quant Fund Manager'
   }
 
   return (
-    <header className="bg-slate-800/50 border-b border-slate-700/50 shadow-md sticky top-0 z-40 backdrop-blur-sm">
+    <header className="bg-slate-950/70 border-b border-slate-700/50 shadow-md sticky top-0 z-40 backdrop-blur-sm">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-4">
@@ -26,14 +27,14 @@ const Header: React.FC<HeaderProps> = ({ activeTool, onNavigateHome }) => {
             </button>
             {activeTool !== 'dashboard' && (
               <>
-                <span className="text-slate-500 text-xl">/</span>
+                <span className="text-slate-600 text-xl font-light">/</span>
                 <span className="text-lg sm:text-xl font-semibold text-slate-300">{toolTitles[activeTool]}</span>
               </>
             )}
           </div>
 
           {activeTool !== 'dashboard' && (
-             <button onClick={onNavigateHome} className="text-sm font-semibold text-cyan-400 hover:text-cyan-300 transition-colors">
+             <button onClick={onNavigateHome} className="text-sm font-semibold text-cyan-400 hover:text-cyan-300 transition-colors hidden sm:block">
               &larr; Back to Dashboard
             </button>
           )}

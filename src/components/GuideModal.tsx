@@ -9,8 +9,8 @@ interface GuideModalProps {
 const GuideModal: React.FC<GuideModalProps> = ({ onClose }) => {
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-slate-800 rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 bg-slate-800/80 backdrop-blur-sm z-10 p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-slate-900/80 backdrop-blur-sm z-10 p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center">
           <h2 className="text-2xl font-bold text-cyan-400">Image Upload Guide</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
