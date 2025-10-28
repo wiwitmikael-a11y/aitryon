@@ -1,299 +1,369 @@
-
-import React, { useReducer, useCallback, useEffect } from 'react';
-import { SpinnerIcon } from './icons/SpinnerIcon';
-import type { TrendAnalysis, CampaignPrompts, AssetMetadata } from '../services/geminiService';
-import { 
-    analyzeTrend, 
-    generateCampaignPrompts, 
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import {
+    generateCreativeStrategy,
     generateStockImage,
     generateVideo,
     checkVideoOperationStatus,
     fetchAndCreateVideoUrl,
     generateMetadataForAsset
 } from '../services/geminiService';
-import { GenerateVideosOperationResponse } from '@google/genai';
+import type { AssetMetadata } from '../services/geminiService';
 import { createContentPackageZip } from '../utils/zipUtils';
 
-// --- State, Reducer, and Types ---
+import { SearchIcon } from './icons/SearchIcon';
+import { StrategyIcon } from './icons/StrategyIcon';
+import { ProductionIcon } from './icons/ProductionIcon';
+import { PackageIcon } from './icons/PackageIcon';
+import { SpinnerIcon } from './icons/SpinnerIcon';
+import { CheckIcon } from './icons/CheckIcon';
+import { CrossIcon } from './icons/CrossIcon';
+import { PhotoIcon } from './icons/PhotoIcon';
+import { VideoGeneratorIcon } from './icons/VideoGeneratorIcon';
 
-type Step = 'idle' | 'analyzing' | 'prompting' | 'generating' | 'generating_metadata' | 'complete';
-type AssetType = 'photo' | 'video';
+type Stage = 'idea' | 'strategy' | 'production' | 'package';
+
 interface Asset {
     id: string;
-    type: AssetType;
+    type: 'photo' | 'video';
     prompt: string;
     status: 'pending' | 'generating' | 'polling' | 'complete' | 'failed';
     src?: string;
+    error?: string;
     metadata?: AssetMetadata;
+    operationName?: string;
 }
 
-interface State {
-    step: Step;
-    trendText: string;
-    photoCount: number;
-    videoCount: number;
-    analysis: TrendAnalysis | null;
-    prompts: CampaignPrompts | null;
-    assets: Asset[];
-    error: string | null;
-}
-
-const initialState: State = {
-    step: 'idle',
-    trendText: '',
-    photoCount: 4,
-    videoCount: 1,
-    analysis: null,
-    prompts: null,
-    assets: [],
-    error: null,
-};
-
-type Action =
-  | { type: 'SET_TREND_TEXT'; payload: string }
-  | { type: 'SET_PHOTO_COUNT'; payload: number }
-  | { type: 'SET_VIDEO_COUNT'; payload: number }
-  | { type: 'START_ANALYSIS' }
-  | { type: 'ANALYSIS_SUCCESS'; payload: TrendAnalysis }
-  | { type: 'ANALYSIS_FAILURE'; payload: string }
-  | { type: 'START_PROMPTING' }
-  | { type: 'PROMPTING_SUCCESS'; payload: CampaignPrompts }
-  | { type: 'START_GENERATION'; payload: Asset[] }
-  | { type: 'UPDATE_ASSET'; payload: { id: string; updates: Partial<Asset> } }
-  | { type: 'GENERATION_COMPLETE' }
-  | { type: 'METADATA_GENERATION_COMPLETE' }
-  | { type: 'RESET' };
-
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case 'SET_TREND_TEXT': return { ...state, trendText: action.payload };
-    case 'SET_PHOTO_COUNT': return { ...state, photoCount: action.payload };
-    case 'SET_VIDEO_COUNT': return { ...state, videoCount: action.payload };
-    case 'START_ANALYSIS': return { ...state, step: 'analyzing', error: null, analysis: null, prompts: null, assets: [] };
-    case 'ANALYSIS_SUCCESS': return { ...state, step: 'prompting', analysis: action.payload };
-    case 'ANALYSIS_FAILURE': return { ...state, step: 'idle', error: action.payload };
-    case 'START_PROMPTING': return { ...state, step: 'prompting', error: null };
-    case 'PROMPTING_SUCCESS': return { ...state, step: 'idle', prompts: action.payload };
-    case 'START_GENERATION': return { ...state, step: 'generating', assets: action.payload };
-    case 'UPDATE_ASSET': return { ...state, assets: state.assets.map(a => a.id === action.payload.id ? { ...a, ...action.payload.updates } : a) };
-    case 'GENERATION_COMPLETE': return { ...state, step: 'generating_metadata' };
-    case 'METADATA_GENERATION_COMPLETE': return { ...state, step: 'complete' };
-    case 'RESET': return initialState;
-    default: return state;
-  }
-}
-
-// --- Component ---
+const VIDEO_POLLING_INTERVAL = 10000; // 10 seconds
 
 const CreativeDirector: React.FC = () => {
-    const [state, dispatch] = useReducer(reducer, initialState);
-    const { step, trendText, photoCount, videoCount, analysis, prompts, assets, error } = state;
+    const [stage, setStage] = useState<Stage>('idea');
+    const [topic, setTopic] = useState('');
+    const [photoCount, setPhotoCount] = useState(3);
+    const [videoCount, setVideoCount] = useState(2);
+    const [assets, setAssets] = useState<Asset[]>([]);
+    const [error, setError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [apiKeySelected, setApiKeySelected] = useState(false);
 
-    const handleAnalyze = async () => {
-        if (!trendText.trim()) return;
-        dispatch({ type: 'START_ANALYSIS' });
-        try {
-            const result = await analyzeTrend(trendText);
-            dispatch({ type: 'ANALYSIS_SUCCESS', payload: result });
-        } catch (e) {
-            dispatch({ type: 'ANALYSIS_FAILURE', payload: e instanceof Error ? e.message : 'Analysis failed' });
-        }
-    };
+    const pollingRefs = useRef<Map<string, number>>(new Map());
 
-    const handleGeneratePrompts = useCallback(async () => {
-        if (!analysis) return;
-        dispatch({ type: 'START_PROMPTING' });
-        try {
-            const result = await generateCampaignPrompts(analysis, photoCount, videoCount);
-            dispatch({ type: 'PROMPTING_SUCCESS', payload: result });
-            const photoAssets: Asset[] = result.photoPrompts.map((p, i) => ({ id: `p-${i}`, type: 'photo', prompt: p, status: 'pending' }));
-            const videoAssets: Asset[] = result.videoPrompts.map((p, i) => ({ id: `v-${i}`, type: 'video', prompt: p, status: 'pending' }));
-            dispatch({ type: 'START_GENERATION', payload: [...photoAssets, ...videoAssets]});
-            dispatch({ type: 'PROMPTING_SUCCESS', payload: result });
-        } catch (e) {
-            dispatch({ type: 'ANALYSIS_FAILURE', payload: e instanceof Error ? e.message : 'Prompt generation failed' });
+    const checkApiKey = useCallback(async () => {
+        // Fix: Added a check for window.aistudio before using it.
+        if (window.aistudio) {
+            const hasKey = await window.aistudio.hasSelectedApiKey();
+            setApiKeySelected(hasKey);
         }
-    }, [analysis, photoCount, videoCount]);
+    }, []);
 
     useEffect(() => {
-        if (step === 'prompting' && analysis) {
-            handleGeneratePrompts();
-        }
-    }, [step, analysis, handleGeneratePrompts]);
+        checkApiKey();
+    }, [checkApiKey]);
+
+    // Cleanup polling intervals on unmount
+    useEffect(() => {
+        return () => {
+            pollingRefs.current.forEach(intervalId => clearInterval(intervalId));
+        };
+    }, []);
 
     const updateAssetState = (id: string, updates: Partial<Asset>) => {
-        dispatch({ type: 'UPDATE_ASSET', payload: { id, updates } });
+        setAssets(prevAssets =>
+            prevAssets.map(asset => (asset.id === id ? { ...asset, ...updates } : asset))
+        );
+    };
+
+    const handleGenerateStrategy = async () => {
+        if (!topic.trim()) {
+            setError('Please enter a topic or project idea.');
+            return;
+        }
+        setIsLoading(true);
+        setError(null);
+        setAssets([]);
+        try {
+            const { photoPrompts, videoPrompts } = await generateCreativeStrategy(topic, photoCount, videoCount);
+            const newAssets: Asset[] = [
+                ...photoPrompts.map((prompt, i) => ({ id: `photo-${i}`, type: 'photo' as const, prompt, status: 'pending' as const })),
+                ...videoPrompts.map((prompt, i) => ({ id: `video-${i}`, type: 'video' as const, prompt, status: 'pending' as const })),
+            ];
+            setAssets(newAssets);
+            setStage('strategy');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'An unknown error occurred while generating the strategy.');
+        } finally {
+            setIsLoading(false);
+        }
     };
     
-    const processVideoGeneration = useCallback(async (asset: Asset) => {
-        try {
-            const initialOp = await generateVideo(asset.prompt);
-            updateAssetState(asset.id, { status: 'polling' });
-            const poll = async (opName: string): Promise<GenerateVideosOperationResponse> => {
-                const currentOp = await checkVideoOperationStatus(opName);
-                if (currentOp.done) return currentOp;
-                await new Promise(resolve => setTimeout(resolve, 10000));
-                return poll(opName);
-            };
-            const finalOp = await poll(initialOp.name!);
-            if (finalOp.error) throw new Error(finalOp.error.message);
-            const uri = finalOp.response?.generatedVideos?.[0]?.video?.uri;
-            if (!uri) throw new Error('No video URI returned');
-            const url = await fetchAndCreateVideoUrl(uri);
-            updateAssetState(asset.id, { src: url, status: 'complete' });
-        } catch (e) {
-            console.error(`Video generation failed for ${asset.id}:`, e);
-            updateAssetState(asset.id, { status: 'failed' });
+    const handleStartProduction = () => {
+        if (videoCount > 0 && !apiKeySelected) {
+            setError("Video generation requires selecting an API key for billing. Please select a key to proceed.");
+            handleSelectKey(); // Prompt user to select key
+            return;
         }
-    }, []);
-
-    const processPhotoGeneration = useCallback(async (asset: Asset) => {
-        try {
-            const src = await generateStockImage(asset.prompt);
-            updateAssetState(asset.id, { src, status: 'complete' });
-        } catch (e) {
-            console.error(`Photo generation failed for ${asset.id}:`, e);
-            updateAssetState(asset.id, { status: 'failed' });
-        }
-    }, []);
-
-    const handleStartGeneration = async () => {
-        if (!prompts) return;
-        const assetsToGenerate = prompts.photoPrompts.map((p, i) => ({ id: `p-${i}`, type: 'photo' as AssetType, prompt: p, status: 'pending' }))
-            .concat(prompts.videoPrompts.map((p, i) => ({ id: `v-${i}`, type: 'video' as AssetType, prompt: p, status: 'pending' })));
-
-        if(videoCount > 0) {
-            await window.aistudio.openSelectKey();
-            const hasKey = await window.aistudio.hasSelectedApiKey();
-            if (!hasKey) {
-                dispatch({type: 'ANALYSIS_FAILURE', payload: "An API key is required to generate videos."});
-                return;
-            }
-        }
-
-        dispatch({ type: 'START_GENERATION', payload: assetsToGenerate });
-        
-        assetsToGenerate.forEach(asset => {
-            updateAssetState(asset.id, { status: 'generating' });
+        setStage('production');
+        assets.forEach(asset => {
             if (asset.type === 'photo') {
-                processPhotoGeneration(asset);
+                processPhotoAsset(asset.id, asset.prompt);
             } else if (asset.type === 'video') {
-                processVideoGeneration(asset);
+                processVideoAsset(asset.id, asset.prompt);
             }
         });
     };
 
-    useEffect(() => {
-        if (step === 'generating' && assets.length > 0 && assets.every(a => a.status === 'complete' || a.status === 'failed')) {
-            dispatch({ type: 'GENERATION_COMPLETE' });
+    const processPhotoAsset = async (id: string, prompt: string) => {
+        updateAssetState(id, { status: 'generating' });
+        try {
+            const [src, metadata] = await Promise.all([
+                generateStockImage(prompt),
+                generateMetadataForAsset(prompt, 'photo')
+            ]);
+            updateAssetState(id, { status: 'complete', src, metadata });
+        } catch (err) {
+            const error = err instanceof Error ? err.message : 'Generation failed.';
+            updateAssetState(id, { status: 'failed', error });
         }
-    }, [assets, step]);
-
-    useEffect(() => {
-        if (step === 'generating_metadata') {
-             const completedAssets = assets.filter(a => a.status === 'complete' && a.type === 'photo');
-             if (completedAssets.length === 0) {
-                dispatch({ type: 'METADATA_GENERATION_COMPLETE' });
-                return;
-             }
-             
-             let metadataCount = 0;
-             completedAssets.forEach(async asset => {
-                if (asset.src) {
-                    try {
-                        const metadata = await generateMetadataForAsset(asset.src);
-                        updateAssetState(asset.id, { metadata });
-                    } catch (e) {
-                        console.error(`Metadata generation failed for ${asset.id}`, e);
-                        // Silently fail on metadata
-                    } finally {
-                        metadataCount++;
-                        if (metadataCount === completedAssets.length) {
-                             dispatch({ type: 'METADATA_GENERATION_COMPLETE' });
-                        }
+    };
+    
+    const processVideoAsset = async (id: string, prompt: string) => {
+        updateAssetState(id, { status: 'generating' });
+        try {
+            const operation = await generateVideo(prompt);
+            if (!operation.name) throw new Error("Video operation name not found.");
+            
+            updateAssetState(id, { status: 'polling', operationName: operation.name });
+            pollVideoStatus(id, operation.name);
+        } catch (err) {
+            const error = err instanceof Error ? err.message : 'Starting video generation failed.';
+            updateAssetState(id, { status: 'failed', error });
+        }
+    };
+    
+    const pollVideoStatus = (id: string, operationName: string) => {
+        const intervalId = window.setInterval(async () => {
+            try {
+                const operation = await checkVideoOperationStatus(operationName);
+                if (operation.done) {
+                    clearInterval(intervalId);
+                    pollingRefs.current.delete(id);
+                    if (operation.error) {
+                        throw new Error(operation.error.message);
                     }
+                    const uri = operation.response?.generatedVideos?.[0]?.video?.uri;
+                    if (!uri) throw new Error("Video URI not found in operation response.");
+
+                    const [src, metadata] = await Promise.all([
+                        fetchAndCreateVideoUrl(uri),
+                        generateMetadataForAsset(assets.find(a => a.id === id)!.prompt, 'video')
+                    ]);
+                    
+                    updateAssetState(id, { status: 'complete', src, metadata });
                 }
-            });
+            } catch (err) {
+                clearInterval(intervalId);
+                pollingRefs.current.delete(id);
+                const error = err instanceof Error ? err.message : 'Polling failed.';
+                if(error === 'API_KEY_INVALID') {
+                    setError("Operation failed. Your API Key may be invalid or missing permissions. Please select a valid key.");
+                    setApiKeySelected(false);
+                }
+                updateAssetState(id, { status: 'failed', error });
+            }
+        }, VIDEO_POLLING_INTERVAL);
+        pollingRefs.current.set(id, intervalId);
+    };
+    
+    useEffect(() => {
+        if (stage === 'production' && assets.length > 0) {
+            const allFinished = assets.every(a => a.status === 'complete' || a.status === 'failed');
+            if (allFinished) {
+                setStage('package');
+            }
         }
-    }, [step, assets]);
+    }, [assets, stage]);
 
     const handleDownloadPackage = () => {
         createContentPackageZip(assets);
     };
 
-    const isBusy = step === 'analyzing' || step === 'prompting' || step === 'generating' || step === 'generating_metadata';
+    const handleSelectKey = async () => {
+        // Fix: Added a check for window.aistudio before using it.
+        if (window.aistudio) {
+            await window.aistudio.openSelectKey();
+            setApiKeySelected(true);
+            setError(null);
+        }
+    };
+    
+    const handleStartOver = () => {
+        setStage('idea');
+        setTopic('');
+        setAssets([]);
+        setError(null);
+        setIsLoading(false);
+        pollingRefs.current.forEach(id => clearInterval(id));
+        pollingRefs.current.clear();
+    };
 
+    const renderStageContent = () => {
+        switch(stage) {
+            case 'idea':
+                return <IdeaStage topic={topic} setTopic={setTopic} photoCount={photoCount} setPhotoCount={setPhotoCount} videoCount={videoCount} setVideoCount={setVideoCount} onGenerate={handleGenerateStrategy} isLoading={isLoading} />;
+            case 'strategy':
+                return <StrategyStage assets={assets} onConfirm={handleStartProduction} onBack={() => setStage('idea')} videoCount={videoCount} apiKeySelected={apiKeySelected} onSelectKey={handleSelectKey}/>;
+            case 'production':
+                return <ProductionStage assets={assets} />;
+            case 'package':
+                return <PackageStage assets={assets} onDownload={handleDownloadPackage} onStartOver={handleStartOver} />;
+        }
+    };
+
+    const stageTitles: Record<Stage, string> = {
+        idea: "1. Project Idea",
+        strategy: "2. Creative Strategy",
+        production: "3. Content Production",
+        package: "4. Download Package"
+    };
+    
     return (
         <div className="space-y-8">
             <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                <h2 className="text-2xl font-bold text-cyan-400 mb-4">1. Trend Analysis</h2>
-                <p className="text-slate-400 mb-3 text-sm">Enter a topic, theme, or paste content from a trend report URL.</p>
-                <textarea
-                    value={trendText}
-                    onChange={(e) => dispatch({ type: 'SET_TREND_TEXT', payload: e.target.value })}
-                    placeholder="e.g., 'Cottagecore aesthetic for summer 2024 fashion' or paste article text here..."
-                    className="w-full h-32 p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    disabled={isBusy}
-                />
-                <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-                     <div className="flex items-center gap-4">
-                        <label className="text-slate-300">Photos:</label>
-                        <input type="number" value={photoCount} min="0" onChange={e => dispatch({type: 'SET_PHOTO_COUNT', payload: parseInt(e.target.value, 10)})} className="w-20 bg-slate-700 p-2 rounded-md" disabled={isBusy} />
-                        <label className="text-slate-300">Videos:</label>
-                        <input type="number" value={videoCount} min="0" onChange={e => dispatch({type: 'SET_VIDEO_COUNT', payload: parseInt(e.target.value, 10)})} className="w-20 bg-slate-700 p-2 rounded-md" disabled={isBusy} />
-                    </div>
-                    <button onClick={handleAnalyze} disabled={isBusy || !trendText.trim()} className="w-full sm:w-auto bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg flex items-center justify-center gap-2">
-                        {step === 'analyzing' || step === 'prompting' ? <SpinnerIcon /> : 'Analyze & Create Prompts'}
-                    </button>
-                </div>
+                <h2 className="text-2xl font-bold text-cyan-400 mb-4">{stageTitles[stage]}</h2>
+                {error && <div className="bg-red-900/20 p-4 rounded-lg text-center text-red-400 mb-4">{error}</div>}
+                {renderStageContent()}
             </div>
-            
-            {error && <div className="bg-red-900/20 p-4 rounded-lg text-center text-red-400">{error}</div>}
-
-            {assets.length > 0 && (
-                <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg">
-                    <div className="flex justify-between items-center mb-4">
-                        <h2 className="text-2xl font-bold text-cyan-400">2. Generation Dashboard</h2>
-                        {step === 'idle' && (
-                             <button onClick={handleStartGeneration} disabled={isBusy} className="bg-green-600 hover:bg-green-500 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg flex items-center justify-center gap-2">
-                                ✨ Generate All Assets
-                            </button>
-                        )}
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {assets.map(asset => (
-                           <div key={asset.id} className="aspect-video bg-slate-900 rounded-lg overflow-hidden flex flex-col justify-between p-3 relative shadow-inner">
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                    {asset.status === 'generating' || asset.status === 'polling' ? <SpinnerIcon /> : null}
-                                    {asset.status === 'complete' && asset.type === 'photo' && <img src={asset.src} className="w-full h-full object-cover" alt={asset.prompt} />}
-                                    {asset.status === 'complete' && asset.type === 'video' && <video src={asset.src} className="w-full h-full object-cover" controls loop />}
-                                    {asset.status === 'failed' && <span className="text-red-400 font-semibold">Failed</span>}
-                                </div>
-                                <div className="z-10 bg-black/50 p-1 rounded-md self-start">
-                                     <span className={`text-xs px-2 py-1 rounded-full ${asset.type === 'photo' ? 'bg-sky-500' : 'bg-purple-500'} text-white capitalize`}>{asset.type}</span>
-                                </div>
-                               {asset.metadata && (
-                                   <div className="z-10 bg-black/60 p-2 rounded-md backdrop-blur-sm text-xs text-slate-300">
-                                       <p className="font-bold truncate">{asset.metadata.title}</p>
-                                       <p className="truncate text-slate-400">{asset.metadata.tags.join(', ')}</p>
-                                   </div>
-                               )}
-                           </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-            {step === 'complete' && (
-                 <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg text-center">
-                      <h2 className="text-2xl font-bold text-cyan-400 mb-4">3. Generation Complete!</h2>
-                      <p className="text-slate-300 mb-6">Your content package is ready, including all assets and a metadata CSV file.</p>
-                       <button onClick={handleDownloadPackage} className="bg-teal-500 hover:bg-teal-400 text-white font-bold py-4 px-8 rounded-full text-xl shadow-lg shadow-teal-500/20">
-                        Download Content Package (.zip)
-                      </button>
-                 </div>
-            )}
         </div>
     );
 };
+
+// Sub-components for each stage for clarity
+
+const IdeaStage: React.FC<any> = ({ topic, setTopic, photoCount, setPhotoCount, videoCount, setVideoCount, onGenerate, isLoading }) => (
+    <div className="space-y-6">
+        <div>
+            <label htmlFor="topic" className="block text-slate-300 font-semibold mb-2">Describe a topic, theme, or visual trend for your content campaign:</label>
+            <textarea
+                id="topic"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g., 'Sustainable living in urban environments', 'The future of remote work', 'Vibrant street food culture at night'"
+                className="w-full h-24 p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                disabled={isLoading}
+            />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+                 <label htmlFor="photoCount" className="block text-slate-300 font-semibold mb-2">Number of Photos:</label>
+                 <input type="number" id="photoCount" value={photoCount} min="1" max="10" onChange={e => setPhotoCount(Number(e.target.value))} className="w-full p-2 bg-slate-700/50 border border-slate-600 rounded-lg"/>
+            </div>
+             <div>
+                 <label htmlFor="videoCount" className="block text-slate-300 font-semibold mb-2">Number of Videos:</label>
+                 <input type="number" id="videoCount" value={videoCount} min="0" max="5" onChange={e => setVideoCount(Number(e.target.value))} className="w-full p-2 bg-slate-700/50 border border-slate-600 rounded-lg"/>
+            </div>
+        </div>
+        <button
+            onClick={onGenerate}
+            disabled={isLoading || !topic.trim()}
+            className="w-full max-w-sm mx-auto flex items-center justify-center bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 text-white font-bold py-3 px-6 rounded-full text-lg shadow-lg transition-all"
+        >
+            {isLoading ? <SpinnerIcon /> : <><SearchIcon /> <span className="ml-2">Generate Creative Strategy</span></>}
+        </button>
+    </div>
+);
+
+const StrategyStage: React.FC<any> = ({ assets, onConfirm, onBack, videoCount, apiKeySelected, onSelectKey }) => (
+    <div>
+        <h3 className="text-lg font-semibold text-slate-200 mb-4">Review the AI-generated content plan. When you're ready, proceed to production.</h3>
+        <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
+            {assets.map((asset: Asset) => (
+                <div key={asset.id} className="p-3 bg-slate-700/50 border border-slate-700 rounded-md flex items-start gap-3">
+                    <span className="text-cyan-400 mt-1">{asset.type === 'photo' ? <PhotoIcon /> : <VideoGeneratorIcon />}</span>
+                    <p className="text-slate-300 text-sm">{asset.prompt}</p>
+                </div>
+            ))}
+        </div>
+         {videoCount > 0 && !apiKeySelected && (
+            <div className="mt-4 bg-amber-900/20 p-4 rounded-lg text-center text-amber-300">
+                <p className="font-semibold">Action Required: Select API Key</p>
+                <p className="text-sm mb-3">Video generation with Veo requires a Google Cloud API key for billing. Please select your key to continue.</p>
+                <button onClick={onSelectKey} className="bg-amber-500 hover:bg-amber-400 text-white font-bold py-2 px-4 rounded-full text-sm">Select API Key</button>
+            </div>
+        )}
+        <div className="flex justify-center gap-4 mt-6">
+            <button onClick={onBack} className="px-6 py-2 rounded-full bg-slate-600 hover:bg-slate-500">Back</button>
+            <button onClick={onConfirm} className="px-8 py-3 rounded-full bg-green-600 hover:bg-green-500 text-white font-bold flex items-center gap-2 shadow-lg">
+                <ProductionIcon /> Start Production
+            </button>
+        </div>
+    </div>
+);
+
+const ProductionStage: React.FC<{ assets: Asset[] }> = ({ assets }) => {
+    const getStatusIndicator = (status: Asset['status']) => {
+        if (status === 'generating' || status === 'polling') return <SpinnerIcon />;
+        if (status === 'complete') return <span className="text-green-400"><CheckIcon /></span>;
+        if (status === 'failed') return <span className="text-red-400"><CrossIcon /></span>;
+        return <span className="text-slate-500">Queued</span>;
+    };
+    
+    return (
+        <div>
+            <h3 className="text-lg font-semibold text-slate-200 mb-4 text-center">Your assets are being generated. This may take several minutes, especially for videos.</h3>
+            <div className="space-y-3">
+                {assets.map(asset => (
+                    <div key={asset.id} className="p-3 bg-slate-900/50 rounded-lg flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                             <span className="text-cyan-400">{asset.type === 'photo' ? <PhotoIcon /> : <VideoGeneratorIcon />}</span>
+                             <p className="text-slate-400 text-sm truncate">{asset.prompt}</p>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm font-semibold">
+                            {getStatusIndicator(asset.status)}
+                            <span className="capitalize w-24 text-left">{asset.status}</span>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const PackageStage: React.FC<any> = ({ assets, onDownload, onStartOver }) => {
+    const successful = assets.filter((a: Asset) => a.status === 'complete');
+    const failed = assets.filter((a: Asset) => a.status === 'failed');
+
+    return (
+        <div className="text-center">
+            <h3 className="text-xl font-semibold text-white mb-2">Production Complete!</h3>
+            <p className="text-slate-400 mb-6">{successful.length} of {assets.length} assets were generated successfully.</p>
+            
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
+                {successful.map((asset: Asset) => (
+                    <div key={asset.id} className="relative aspect-video bg-slate-900 rounded-lg overflow-hidden">
+                        {asset.type === 'photo' ? (
+                            <img src={asset.src} alt={asset.prompt} className="w-full h-full object-cover" />
+                        ) : (
+                            <video src={asset.src} muted loop autoPlay className="w-full h-full object-cover" />
+                        )}
+                        <div className="absolute top-1 right-1 p-1 bg-green-500 rounded-full text-white"><CheckIcon /></div>
+                    </div>
+                ))}
+                 {failed.map((asset: Asset) => (
+                    <div key={asset.id} className="relative aspect-video bg-red-900/30 rounded-lg flex items-center justify-center p-2" title={asset.error}>
+                        <CrossIcon />
+                         <p className="text-xs text-red-300 absolute bottom-1 text-center">Failed</p>
+                    </div>
+                ))}
+            </div>
+
+            <div className="flex flex-col items-center gap-4">
+                 <button onClick={onDownload} className="w-full max-w-sm flex items-center justify-center bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-full text-lg shadow-lg">
+                    <PackageIcon /> <span className="ml-2">Download Content Package (.zip)</span>
+                </button>
+                 <button onClick={onStartOver} className="text-slate-400 hover:text-cyan-400">Start a New Project</button>
+            </div>
+        </div>
+    );
+};
+
 
 export default CreativeDirector;
