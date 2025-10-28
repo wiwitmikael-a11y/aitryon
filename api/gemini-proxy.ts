@@ -10,15 +10,23 @@ import {
 // Helper to remove data URL prefix
 const stripDataUrlPrefix = (dataUrl: string) => dataUrl.replace(/^data:image\/\w+;base64,/, '');
 
-// Initialize Gemini
-// FIX: Use named parameter for apiKey
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Models
 const textModel = 'gemini-2.5-flash';
 const imageModel = 'imagen-4.0-generate-001';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
+    }
+
+    // Initialize Gemini safely inside the handler
+    let ai;
+    try {
+      // FIX: The GoogleGenAI constructor expects an object with an `apiKey` property.
+      ai = new GoogleGenAI({apiKey: process.env.API_KEY!});
+    } catch(e) {
+      console.error("Failed to initialize GoogleGenAI. Check API_KEY.", e);
+      return res.status(500).json({ error: "Server configuration error: Failed to initialize AI service." });
     }
 
     try {
@@ -83,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     contents: promptMap[type],
                 });
 
-                return res.status(200).json({ prompt: response.text.replace(/"/g, '') });
+                return res.status(200).json({ prompt: response.text?.replace(/"/g, '') ?? '' });
             }
 
             case 'generateCreativeStrategy': {
@@ -106,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
                 });
                 
-                return res.status(200).json(JSON.parse(response.text));
+                return res.status(200).json(JSON.parse(response.text ?? '{}'));
             }
 
             case 'generateMetadataForAsset': {
@@ -131,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
                 });
 
-                return res.status(200).json(JSON.parse(response.text));
+                return res.status(200).json(JSON.parse(response.text ?? '{}'));
             }
 
             case 'generateStockImage': {
@@ -146,7 +154,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
                 });
 
-                const imageBytes = imageResponse.generatedImages[0].image.imageBytes;
+                const imageBytes = imageResponse.generatedImages?.[0]?.image?.imageBytes;
+                if (!imageBytes) throw new Error("Image generation failed, no image bytes returned.");
+                
                 const src = `data:image/png;base64,${imageBytes}`;
                 
                 let metadata = null;
@@ -169,7 +179,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             }
                         }
                     });
-                    metadata = JSON.parse(metaResponse.text);
+                    metadata = JSON.parse(metaResponse.text ?? '{}');
                 }
                 
                 return res.status(200).json({ src, metadata });
@@ -195,7 +205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
                 });
                 
-                const { theme, prompts } = JSON.parse(themeResponse.text);
+                const { theme, prompts } = JSON.parse(themeResponse.text ?? '{ "theme": "", "prompts": [] }');
 
                 const imagePromises = prompts.map((p: string) => 
                     ai.models.generateImages({
@@ -216,10 +226,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         console.error(`Failed to generate image for prompt: "${result.prompt}"`, result.error);
                         return { id: `batch-${i}`, prompt: prompts[i], src: null };
                     }
+                    const imageBytes = result.generatedImages?.[0]?.image?.imageBytes;
                     return {
                         id: `batch-${i}`,
                         prompt: prompts[i],
-                        src: `data:image/png;base64,${result.generatedImages[0].image.imageBytes}`,
+                        src: imageBytes ? `data:image/png;base64,${imageBytes}` : null,
                     };
                 });
 
@@ -227,30 +238,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             case 'generateVideo': {
-                const { prompt, aspectRatio } = payload;
-                const operation = await ai.models.generateVideos({
-                    model: VEO_MODEL_ID,
-                    prompt,
-                    config: {
-                        numberOfVideos: 1,
-                        resolution: '1080p',
-                        aspectRatio: aspectRatio
+                const token = await getAuthToken(); // Veo needs Vertex Auth
+                const endpoint = `${VERTEX_AI_API_BASE}/publishers/google/models/${VEO_MODEL_ID}:generateVideos`;
+                const requestBody = {
+                    prompt: payload.prompt,
+                    video_generation_config: {
+                        number_of_videos: 1,
+                        resolution: "1080p",
+                        aspect_ratio: payload.aspectRatio,
                     }
+                }
+                 const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
                 });
+                 if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`Veo Start Error: ${errorText}`);
+                    throw new Error(`Veo generation start failed with status ${response.status}.`);
+                }
+                 const operation = await response.json();
                 return res.status(200).json(operation);
             }
 
             case 'checkVideoOperationStatus': {
+                const token = await getAuthToken();
                 const { operationName } = payload;
-                const operation = await ai.operations.getVideosOperation({ 
-                    operation: { name: operationName, done: false }
+                const endpoint = `${VERTEX_AI_API_BASE}/${operationName}`;
+                
+                const response = await fetch(endpoint, {
+                    method: 'GET',
+                    headers: { 'Authorization': `Bearer ${token}` }
                 });
+                 if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`Veo Status Check Error: ${errorText}`);
+                    throw new Error(`Veo status check failed with status ${response.status}.`);
+                }
+                const operation = await response.json();
                 return res.status(200).json(operation);
             }
 
             case 'fetchVideo': {
                 const { uri } = payload;
-                const fetchUrl = `${uri}&key=${process.env.API_KEY}`;
+                const fetchUrl = `${uri}?key=${process.env.API_KEY}`;
                 const videoResponse = await fetch(fetchUrl);
                 
                 if (!videoResponse.ok) {
