@@ -46,14 +46,3 @@ export interface HistoryItem {
   personImage: string;
   productImage: string;
 }
-
-// Types for Guide Modal
-export interface GuideExample {
-  type: 'good' | 'bad';
-  text: string;
-}
-
-export interface Guidelines {
-  title: string;
-  examples: GuideExample[];
-}
