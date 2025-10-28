@@ -1,48 +1,15 @@
-import { GoogleAuth } from 'google-auth-library';
+import { GoogleGenAI } from "@google/genai";
 
-let authToken: { token: string | null | undefined, expiry: number } | null = null;
+// Ensure the API key is available. This is a hard requirement.
+if (!process.env.API_KEY) {
+    // This error will be caught by the Vercel runtime and logged.
+    // The client will receive a 500 Internal Server Error.
+    throw new Error("API_KEY environment variable is not set.");
+}
 
 /**
- * Gets a Google Cloud access token, using a cached token if available and not expired.
- * It reads credentials from a Base64 encoded environment variable for stability on Vercel.
+ * A singleton instance of the GoogleGenAI client.
+ * Initialized with the API key from environment variables.
  */
-export async function getAuthToken(): Promise<string> {
-    if (authToken && authToken.token && authToken.expiry > Date.now()) {
-        return authToken.token;
-    }
-
-    const credsB64 = process.env.GOOGLE_CREDENTIALS_B64;
-    if (!credsB64) {
-        throw new Error('GOOGLE_CREDENTIALS_B64 environment variable not set.');
-    }
-
-    try {
-        const credsJson = Buffer.from(credsB64, 'base64').toString('utf-8');
-        const credentials = JSON.parse(credsJson);
-
-        const auth = new GoogleAuth({
-            credentials,
-            scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-        });
-
-        const client = await auth.getClient();
-        const accessTokenResponse = await client.getAccessToken();
-
-        if (!accessTokenResponse || !accessTokenResponse.token) {
-            throw new Error('Failed to obtain access token from Google Auth.');
-        }
-        
-        // Cache the token with its expiry date (expiry_date is in seconds, convert to ms)
-        // Give a 60-second buffer before expiry.
-        authToken = {
-            token: accessTokenResponse.token,
-            expiry: (accessTokenResponse.res?.data.expiry_date || (Date.now() / 1000 + 3540)) * 1000 - 60000,
-        };
-
-        return authToken.token;
-
-    } catch (error) {
-        console.error("Authentication Error:", error);
-        throw new Error(`Failed to authenticate with Google Cloud. Please check GOOGLE_CREDENTIALS_B64. Error: ${error instanceof Error ? error.message : 'Unknown auth error'}`);
-    }
-}
+// FIX: Initialize GoogleGenAI with a named apiKey parameter as required by the new SDK versions.
+export const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
