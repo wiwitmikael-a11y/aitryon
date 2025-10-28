@@ -5,13 +5,18 @@ import { getGoogleAuthToken } from './lib/google-auth';
 import { VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, VEO_MODEL_ID } from '../src/constants';
 
 
-// Ensure the API key is available in environment variables for non-Vertex AI calls (e.g., Gemini Flash for prompts, Imagen)
+// --- AUTHENTICATION SETUP ---
+
+// 1. API_KEY for Gemini Text & Imagen Photo Models
+// Sesuai instruksi: Ini digunakan secara EKSKLUSIF untuk semua pembuatan teks, riset, dan foto.
 if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable is not set.");
+    throw new Error("FATAL: API_KEY environment variable is not set for Gemini/Imagen models.");
 }
+const geminiAiWithApiKey = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
+// 2. VERTEX CREDENTIALS for Video (Veo) & Virtual Try-On
+// Sesuai instruksi: Ini digunakan secara EKSKLUSIF untuk layanan Vertex AI.
+// Fungsi getGoogleAuthToken di ./lib/google-auth.ts akan menangani GOOGLE_CREDENTIALS_JSON.
 const VERTEX_AI_API_BASE = `https://${VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_AI_PROJECT_ID}/locations/${VERTEX_AI_LOCATION}`;
 
 
@@ -29,20 +34,12 @@ async function handler(req: VercelRequest, res: VercelResponse) {
 
         let result;
         switch (task) {
+            // --- Handlers using API_KEY ---
             case 'generateCreativeStrategy':
                 result = await handleGenerateCreativeStrategy(payload);
                 break;
             case 'generateStockImage':
                 result = await handleGenerateStockImage(payload);
-                break;
-            case 'generateVideo':
-                result = await handleGenerateVideo(payload);
-                break;
-            case 'checkVideoOperationStatus':
-                result = await handleCheckVideoOperationStatus(payload);
-                break;
-            case 'fetchVideo':
-                result = await handleFetchVideo(payload);
                 break;
             case 'generateMetadataForAsset':
                 result = await handleGenerateMetadataForAsset(payload);
@@ -53,18 +50,33 @@ async function handler(req: VercelRequest, res: VercelResponse) {
             case 'generatePhotoShootPrompts':
                 result = await handleGeneratePhotoShootPrompts(payload);
                 break;
+            
+            // --- Handlers using VERTEX CREDENTIALS ---
+            case 'generateVideo':
+                result = await handleGenerateVideo(payload);
+                break;
+            case 'checkVideoOperationStatus':
+                result = await handleCheckVideoOperationStatus(payload);
+                break;
+            case 'fetchVideo':
+                result = await handleFetchVideo(payload);
+                break;
+
             default:
                 return res.status(400).json({ error: 'Invalid task' });
         }
         res.status(200).json(result);
     } catch (error) {
-        console.error(`Error in proxy handler:`, error);
+        console.error(`Error in proxy handler for task "${req.body?.task}":`, error);
         const message = error instanceof Error ? error.message : 'An unknown server error occurred.';
         res.status(500).json({ error: message });
     }
 }
 
+// --- Task Handlers using API_KEY Authentication ---
+
 async function handleGeneratePhotoShootPrompts(payload: any) {
+    // Auth Method: API_KEY
     const model = 'gemini-2.5-pro';
     const systemInstruction = `You are a visionary Art Director for a major global brand like Apple, Nike, or Patagonia. You are planning a high-concept photo shoot.
 Your task is to create a complete, narrative-driven shot list.
@@ -73,7 +85,7 @@ Your task is to create a complete, narrative-driven shot list.
 
 Your response MUST be a valid JSON object with two keys: "theme" (a string for the core concept) and "prompts" (an array of exactly 10 detailed string prompts).`;
 
-    const response = await ai.models.generateContent({
+    const response = await geminiAiWithApiKey.models.generateContent({
         model,
         contents: "Generate a new photo shoot concept and narrative shot list.",
         config: { 
@@ -102,9 +114,8 @@ Your response MUST be a valid JSON object with two keys: "theme" (a string for t
     }
 }
 
-
-// --- Task Handlers ---
 async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' | 'campaign' }) {
+    // Auth Method: API_KEY
     const model = 'gemini-2.5-pro';
     let systemInstruction = '';
     
@@ -120,7 +131,7 @@ async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' 
             break;
     }
 
-    const response = await ai.models.generateContent({
+    const response = await geminiAiWithApiKey.models.generateContent({
         model,
         contents: `Generate one perfected, market-aware ${type} concept.`,
         config: { systemInstruction }
@@ -130,6 +141,7 @@ async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' 
 }
 
 async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }: any) {
+    // Auth Method: API_KEY
     const model = 'gemini-2.5-pro'; // Use a powerful model for strategy
     const prompt = `
         As a visionary Chief Creative Officer, your task is to translate a high-level campaign topic into a concrete, multi-format content strategy. The campaign topic is: "${topic}".
@@ -140,7 +152,7 @@ async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }:
 
         CRITICAL: The photo and video prompts must not be disconnected ideas. They must work together to tell a cohesive story that reinforces the main campaign topic. Ensure there is a clear narrative and thematic link across all generated assets.
     `;
-    const response = await ai.models.generateContent({
+    const response = await geminiAiWithApiKey.models.generateContent({
         model,
         contents: prompt,
         config: { responseMimeType: "application/json" }
@@ -149,7 +161,8 @@ async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }:
 }
 
 async function handleGenerateStockImage({ prompt, aspectRatio, generateMetadata }: any) {
-    const imageResponse = await ai.models.generateImages({
+    // Auth Method: API_KEY
+    const imageResponse = await geminiAiWithApiKey.models.generateImages({
         model: 'imagen-4.0-generate-001',
         prompt: prompt,
         config: {
@@ -173,11 +186,12 @@ async function handleGenerateStockImage({ prompt, aspectRatio, generateMetadata 
 }
 
 async function handleGenerateMetadataForAsset({ prompt, type }: any) {
+    // Auth Method: API_KEY
     const model = 'gemini-2.5-flash';
     const systemInstruction = `You are an expert in SEO and digital asset management for premium marketplaces like Getty Images. Generate metadata for a digital asset. The response must be a valid JSON object with three keys: "title" (a compelling, descriptive title, max 60 chars), "description" (a concise, professional summary, max 160 chars), and "tags" (an array of 5-10 highly relevant, commercial-intent lowercase keywords).`;
     const userPrompt = `Generate metadata for a ${type} with the following theme or prompt: "${prompt}"`;
     
-    const response = await ai.models.generateContent({
+    const response = await geminiAiWithApiKey.models.generateContent({
         model,
         contents: userPrompt,
         config: {
@@ -199,7 +213,10 @@ async function handleGenerateMetadataForAsset({ prompt, type }: any) {
 }
 
 
+// --- Task Handlers that use VERTEX CREDENTIALS Authentication ---
+
 async function handleGenerateVideo({ prompt, aspectRatio }: any) {
+    // Auth Method: VERTEX CREDENTIALS
     const authToken = await getGoogleAuthToken();
     const endpoint = `${VERTEX_AI_API_BASE}/publishers/google/models/${VEO_MODEL_ID}:generateVideos`;
 
@@ -231,8 +248,8 @@ async function handleGenerateVideo({ prompt, aspectRatio }: any) {
 }
 
 async function handleCheckVideoOperationStatus({ operationName }: any) {
+    // Auth Method: VERTEX CREDENTIALS
     const authToken = await getGoogleAuthToken();
-    // The operation name is the full resource path, so we don't need to construct it.
     const endpoint = `https://${VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1/${operationName}`;
 
     const response = await fetch(endpoint, {
@@ -252,12 +269,12 @@ async function handleCheckVideoOperationStatus({ operationName }: any) {
     return response.json();
 }
 
-
 async function handleFetchVideo({ uri }: any) {
-    // NOTE: The download URI from Veo is a publicly accessible signed URL that
-    // requires the API_KEY as a query parameter, separate from the Vertex AI API auth.
-    // This is the intended mechanism.
-    if (!process.env.API_KEY) throw new Error("API key is required to fetch video.");
+    // Auth Method: API_KEY (for download URL only, as per Veo documentation)
+    // Ini adalah kasus khusus. Memulai dan memeriksa status video menggunakan Kredensial Vertex,
+    // tetapi URL unduhan yang dihasilkan oleh Google memerlukan API_KEY sebagai parameter query.
+    if (!process.env.API_KEY) throw new Error("API key is required to fetch the final video file from its download URI.");
+    
     const response = await fetch(`${uri}&key=${process.env.API_KEY}`);
     if (!response.ok) {
         throw new Error(`Failed to fetch video from URI. Status: ${response.statusText}`);

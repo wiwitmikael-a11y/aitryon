@@ -3,14 +3,17 @@ import { db } from './lib/db';
 import type { BatchJob, BatchImageResult } from '../src/types';
 import { GoogleGenAI } from "@google/genai";
 
+// --- AUTHENTICATION ---
+// This background job is for PHOTO generation.
+// As per correct architecture, it exclusively uses API_KEY.
 if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable is not set.");
+    throw new Error("FATAL: API_KEY environment variable is not set for batch photo processing.");
 }
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const geminiAiWithApiKey = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 
 async function generateImageForPrompt(prompt: string, aspectRatio: '1:1' | '16:9' | '9:16'): Promise<{src: string}> {
-    const imageResponse = await ai.models.generateImages({
+    const imageResponse = await geminiAiWithApiKey.models.generateImages({
         model: 'imagen-4.0-generate-001',
         prompt: prompt,
         config: {

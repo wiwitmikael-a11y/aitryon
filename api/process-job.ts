@@ -4,6 +4,10 @@ import { getGoogleAuthToken } from './lib/google-auth';
 import { VERTEX_AI_API_BASE, VIRTUAL_TRY_ON_MODEL_ID } from '../src/constants';
 import type { VertexAIRequestInstance, VertexAIRequestParameters, VertexAIResponse, Job } from '../src/types';
 
+// --- AUTHENTICATION ---
+// This background job is for VIRTUAL TRY-ON.
+// As per correct architecture, it exclusively uses GOOGLE_CREDENTIALS_JSON via the auth helper.
+
 // Helper to remove the data URL prefix if it exists
 const getBase64Data = (dataUrl: string): string => {
   const parts = dataUrl.split(',');
@@ -33,7 +37,6 @@ export default async function handler(
   res.status(202).end();
 
   try {
-    // FIX: Use generic type argument for db.get
     const job = await db.get<Job>(jobId);
     if (!job) {
       console.error(`Job not found: ${jobId}`);
