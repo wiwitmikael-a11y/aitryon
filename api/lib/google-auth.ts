@@ -6,10 +6,10 @@ let tokenExpiry: Date | null = null;
 // This is the definitive, robust method for handling credentials.
 async function getCredentials() {
   const base64Credentials = process.env.GOOGLE_CREDENTIALS_B64;
-  const jsonCredentials = process.env.GOOGLE_CREDENTIALS_JSON;
 
   if (base64Credentials) {
     try {
+      // In a Node.js environment, Buffer is a built-in global.
       const decodedJson = Buffer.from(base64Credentials, 'base64').toString('utf-8');
       return JSON.parse(decodedJson);
     } catch (error) {
@@ -18,17 +18,7 @@ async function getCredentials() {
     }
   }
 
-  if (jsonCredentials) {
-    try {
-      // This is less reliable but kept as a fallback.
-      return JSON.parse(jsonCredentials);
-    } catch (error) {
-      console.error("Fatal: Failed to parse GOOGLE_CREDENTIALS_JSON.", error);
-      throw new Error("GOOGLE_CREDENTIALS_JSON is not a valid JSON string. Consider using the Base64 method.");
-    }
-  }
-
-  throw new Error('Neither GOOGLE_CREDENTIALS_B64 nor GOOGLE_CREDENTIALS_JSON environment variable is set.');
+  throw new Error('FATAL: GOOGLE_CREDENTIALS_B64 environment variable is not set.');
 }
 
 

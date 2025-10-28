@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db } from './lib/db.ts';
-import type { Job } from '../src/types.ts';
+import { db } from './lib/db.js';
+import type { Job } from '../src/types.js';
 
 export default async function handler(
   req: VercelRequest,

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type } from "@google/genai";
-import { getGoogleAuthToken } from './lib/google-auth.ts';
-import { VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, VEO_MODEL_ID } from '../src/constants.ts';
+import { getGoogleAuthToken } from './lib/google-auth.js';
+import { VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, VEO_MODEL_ID } from '../src/constants.js';
 
 
 // --- AUTHENTICATION SETUP ---
@@ -292,6 +292,7 @@ async function handleFetchVideo({ uri }: any) {
         throw new Error(`Failed to fetch video from URI. Status: ${response.statusText}`);
     }
     const buffer = await response.arrayBuffer();
+    // In a Node.js environment, Buffer is a built-in global.
     const videoBytes = Buffer.from(buffer).toString('base64');
     return { videoBytes };
 }

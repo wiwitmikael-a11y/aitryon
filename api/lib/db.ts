@@ -1,5 +1,5 @@
 import { kv } from "@vercel/kv";
-import type { Job, BatchJob } from '../../src/types.ts';
+import type { Job, BatchJob } from '../../src/types.js';
 
 // Use a union type for things we can store
 type Storable = Job | BatchJob;
