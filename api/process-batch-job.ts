@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db } from './lib/db.js';
-import type { BatchJob } from '../src/types.js';
+import { db } from './lib/db';
+import type { BatchJob } from '../src/types';
 import { GoogleGenAI } from "@google/genai";
 
 // --- AUTHENTICATION ---
