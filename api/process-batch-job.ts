@@ -6,13 +6,16 @@ import { GoogleGenAI } from "@google/genai";
 // --- AUTHENTICATION ---
 // This background job is for PHOTO generation.
 // As per correct architecture, it exclusively uses API_KEY.
-if (!process.env.API_KEY) {
-    throw new Error("FATAL: API_KEY environment variable is not set for batch photo processing.");
-}
-const geminiAiWithApiKey = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// The client is initialized Just-In-Time (JIT) inside the generation function
+// to prevent module-level crashes.
 
 
 async function generateImageForPrompt(prompt: string, aspectRatio: '1:1' | '16:9' | '9:16'): Promise<{src: string}> {
+    if (!process.env.API_KEY) {
+        throw new Error("FATAL: API_KEY environment variable is not set for batch photo processing.");
+    }
+    const geminiAiWithApiKey = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
     const imageResponse = await geminiAiWithApiKey.models.generateImages({
         model: 'imagen-4.0-generate-001',
         prompt: prompt,

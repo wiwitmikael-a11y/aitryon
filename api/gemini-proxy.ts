@@ -9,10 +9,7 @@ import { VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, VEO_MODEL_ID } from '../src/c
 
 // 1. API_KEY for Gemini Text & Imagen Photo Models
 // Sesuai instruksi: Ini digunakan secara EKSKLUSIF untuk semua pembuatan teks, riset, dan foto.
-if (!process.env.API_KEY) {
-    throw new Error("FATAL: API_KEY environment variable is not set for Gemini/Imagen models.");
-}
-const geminiAiWithApiKey = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Inisialisasi akan dilakukan JIT (Just-In-Time) di dalam setiap handler untuk mencegah crash level modul.
 
 // 2. VERTEX CREDENTIALS for Video (Veo) & Virtual Try-On
 // Sesuai instruksi: Ini digunakan secara EKSKLUSIF untuk layanan Vertex AI.
@@ -58,6 +55,8 @@ async function handler(req: VercelRequest, res: VercelResponse) {
             case 'checkVideoOperationStatus':
                 result = await handleCheckVideoOperationStatus(payload);
                 break;
+            
+            // --- Handler using API_KEY for download ---
             case 'fetchVideo':
                 result = await handleFetchVideo(payload);
                 break;
@@ -73,10 +72,20 @@ async function handler(req: VercelRequest, res: VercelResponse) {
     }
 }
 
+// --- Helper function for robust API_KEY client initialization ---
+function getGeminiClientWithApiKey() {
+    if (!process.env.API_KEY) {
+        throw new Error("FATAL: API_KEY environment variable is not set for Gemini/Imagen models.");
+    }
+    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+}
+
+
 // --- Task Handlers using API_KEY Authentication ---
 
 async function handleGeneratePhotoShootPrompts(payload: any) {
     // Auth Method: API_KEY
+    const geminiAiWithApiKey = getGeminiClientWithApiKey();
     const model = 'gemini-2.5-pro';
     const systemInstruction = `You are a visionary Art Director for a major global brand like Apple, Nike, or Patagonia. You are planning a high-concept photo shoot.
 Your task is to create a complete, narrative-driven shot list.
@@ -116,6 +125,7 @@ Your response MUST be a valid JSON object with two keys: "theme" (a string for t
 
 async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' | 'campaign' }) {
     // Auth Method: API_KEY
+    const geminiAiWithApiKey = getGeminiClientWithApiKey();
     const model = 'gemini-2.5-pro';
     let systemInstruction = '';
     
@@ -142,6 +152,7 @@ async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' 
 
 async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }: any) {
     // Auth Method: API_KEY
+    const geminiAiWithApiKey = getGeminiClientWithApiKey();
     const model = 'gemini-2.5-pro'; // Use a powerful model for strategy
     const prompt = `
         As a visionary Chief Creative Officer, your task is to translate a high-level campaign topic into a concrete, multi-format content strategy. The campaign topic is: "${topic}".
@@ -162,6 +173,7 @@ async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }:
 
 async function handleGenerateStockImage({ prompt, aspectRatio, generateMetadata }: any) {
     // Auth Method: API_KEY
+    const geminiAiWithApiKey = getGeminiClientWithApiKey();
     const imageResponse = await geminiAiWithApiKey.models.generateImages({
         model: 'imagen-4.0-generate-001',
         prompt: prompt,
@@ -187,6 +199,7 @@ async function handleGenerateStockImage({ prompt, aspectRatio, generateMetadata 
 
 async function handleGenerateMetadataForAsset({ prompt, type }: any) {
     // Auth Method: API_KEY
+    const geminiAiWithApiKey = getGeminiClientWithApiKey();
     const model = 'gemini-2.5-flash';
     const systemInstruction = `You are an expert in SEO and digital asset management for premium marketplaces like Getty Images. Generate metadata for a digital asset. The response must be a valid JSON object with three keys: "title" (a compelling, descriptive title, max 60 chars), "description" (a concise, professional summary, max 160 chars), and "tags" (an array of 5-10 highly relevant, commercial-intent lowercase keywords).`;
     const userPrompt = `Generate metadata for a ${type} with the following theme or prompt: "${prompt}"`;
