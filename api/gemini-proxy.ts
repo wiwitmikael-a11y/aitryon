@@ -56,13 +56,16 @@ async function handler(req: VercelRequest, res: VercelResponse) {
 
 async function handleGeneratePhotoShootPrompts(payload: any) {
     const model = 'gemini-2.5-pro';
-    const systemInstruction = `You are a world-class art director planning a commercial photo shoot. Your goal is to generate a cohesive set of 10 images around a single, commercially valuable theme.
-First, define a concise 'theme'. Then, create an array of 10 highly detailed and distinct prompts that explore variations of this theme. These variations should cover different angles, lighting, compositions, subjects, and emotions.
-Your response MUST be a valid JSON object with two keys: "theme" (a string) and "prompts" (an array of exactly 10 strings).`;
+    const systemInstruction = `You are a visionary Art Director for a major global brand like Apple, Nike, or Patagonia. You are planning a high-concept photo shoot.
+Your task is to create a complete, narrative-driven shot list.
+1.  **Define a Core Concept/Theme:** This should be a powerful, single-sentence idea that is commercially relevant and emotionally resonant.
+2.  **Create a Narrative Shot List:** Generate an array of exactly 10 distinct, highly-detailed prompts. These prompts are not random variations; they must follow a logical narrative sequence as if telling a story. For example: an establishing shot, a medium shot of the subject, a detail/macro shot of a key object, an action shot, an emotional portrait, an abstract shot, etc. Each prompt must be unique and contribute to the overall story of the theme.
+
+Your response MUST be a valid JSON object with two keys: "theme" (a string for the core concept) and "prompts" (an array of exactly 10 detailed string prompts).`;
 
     const response = await ai.models.generateContent({
         model,
-        contents: "Generate a new photo shoot concept.",
+        contents: "Generate a new photo shoot concept and narrative shot list.",
         config: { 
             systemInstruction,
             responseMimeType: "application/json",
@@ -97,19 +100,19 @@ async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' 
     
     switch (type) {
         case 'photo':
-            systemInstruction = `You are an elite art director for a high-end stock photography service like Getty Images or Stocksy. Your job is to create concepts that are modern, commercially valuable, and align with current visual trends. Avoid clichés. Focus on authenticity, dynamic lighting, and concepts relevant to tech, remote work, wellness, and sustainability. Generate a single, highly detailed prompt suitable for a cutting-edge AI image generator. Do not respond with anything other than the prompt string itself. No extra text or labels.`;
+            systemInstruction = `You are an award-winning conceptual photographer and art director. Your task is to perform a rapid analysis of visual trends on platforms like Behance and Pinterest to identify an under-explored, commercially viable theme. Then, create a single, highly detailed prompt that tells a "micro-story." The prompt must feel like a scene from an art-house film, specifying not just the subject, but the mood, the quality of light, the color palette, and a sense of narrative. Avoid stock photo clichés at all costs. The output must be ONLY the prompt string itself, without any introductory text or labels.`;
             break;
         case 'video':
-            systemInstruction = `You are a world-class commercial and film director. Your task is to conceptualize a short, 5-second video clip that is visually stunning and has high commercial appeal for use in digital advertising. The prompt must specify camera movement (e.g., slow-motion, drone shot, tracking shot), lighting (e.g., golden hour, neon glow), and a clear, emotionally resonant subject. Focus on luxury, technology, or nature themes. Generate a single, detailed prompt suitable for the Veo model. Do not respond with anything but the prompt string itself. No extra text or labels.`;
+            systemInstruction = `You are a director pitching a multi-million dollar Super Bowl commercial. You have 5 seconds to captivate the audience. Your task is to generate a single, incredibly dense and evocative prompt for a video. The prompt must describe a complete sensory experience: advanced cinematography (e.g., 'anamorphic lens flare', 'split-diopter focus'), a clear emotional arc (e.g., 'from tension to relief'), and implied sound design (e.g., 'the silence is broken by a single, resonant chord'). The concept must be groundbreaking and unforgettable. The output must be ONLY the prompt string itself, without any introductory text or labels.`;
             break;
         case 'campaign':
-            systemInstruction = `You are a Chief Creative Officer at a top global advertising agency. Your task is to devise a single, groundbreaking campaign concept for a modern, direct-to-consumer brand. The concept should be emotionally resonant, highly shareable on social media, and have a clear marketing objective. Focus on current cultural trends and consumer behavior. Respond with only the campaign topic string. No extra text or labels.`;
+            systemInstruction = `You are a Chief Strategy Officer at a market-disrupting advertising agency. Your task is to identify a recent, specific cultural insight or data point about consumer behavior. Based on this insight, you must formulate a single, powerful, and provocative "Big Idea" for a brand campaign. This idea should be summarized in a single, memorable sentence that serves as the campaign topic. It must be innovative and have high potential for going viral. The output must be ONLY the campaign topic string, without any introductory text or labels.`;
             break;
     }
 
     const response = await ai.models.generateContent({
         model,
-        contents: `Generate one creative ${type} concept.`,
+        contents: `Generate one perfected, market-aware ${type} concept.`,
         config: { systemInstruction }
     });
 
@@ -119,12 +122,13 @@ async function handleGenerateCreativePrompt({ type }: { type: 'photo' | 'video' 
 async function handleGenerateCreativeStrategy({ topic, photoCount, videoCount }: any) {
     const model = 'gemini-2.5-pro'; // Use a powerful model for strategy
     const prompt = `
-        As an expert creative director, generate a content strategy for the following topic: "${topic}".
-        Your response must be in JSON format.
-        The JSON object should have two keys: "photoPrompts" and "videoPrompts".
-        - "photoPrompts" should be an array of exactly ${photoCount} strings. Each string is a detailed, visually rich prompt for an AI image generator (like Imagen) to create a stock photo.
-        - "videoPrompts" should be an array of exactly ${videoCount} strings. Each string is a descriptive prompt for an AI video generator (like Veo) to create a short, cinematic video clip (5-10 seconds).
-        The prompts should be diverse, creative, and aligned with the central topic.
+        As a visionary Chief Creative Officer, your task is to translate a high-level campaign topic into a concrete, multi-format content strategy. The campaign topic is: "${topic}".
+        
+        Your response must be a perfectly formed JSON object with two keys: "photoPrompts" and "videoPrompts".
+        - "photoPrompts" must be an array of exactly ${photoCount} strings. Each prompt must be a detailed, visually rich directive for an AI image generator.
+        - "videoPrompts" must be an array of exactly ${videoCount} strings. Each prompt must be a descriptive directive for an AI video generator to create a short, cinematic clip.
+
+        CRITICAL: The photo and video prompts must not be disconnected ideas. They must work together to tell a cohesive story that reinforces the main campaign topic. Ensure there is a clear narrative and thematic link across all generated assets.
     `;
     const response = await ai.models.generateContent({
         model,
@@ -160,7 +164,7 @@ async function handleGenerateStockImage({ prompt, aspectRatio, generateMetadata 
 
 async function handleGenerateMetadataForAsset({ prompt, type }: any) {
     const model = 'gemini-2.5-flash';
-    const systemInstruction = `You are an expert in SEO and content marketing. Generate metadata for a digital asset. The response must be a valid JSON object with three keys: "title" (a catchy, descriptive title, max 60 chars), "description" (a concise summary, max 160 chars), and "tags" (an array of 5-10 relevant lowercase keywords).`;
+    const systemInstruction = `You are an expert in SEO and digital asset management for premium marketplaces like Getty Images. Generate metadata for a digital asset. The response must be a valid JSON object with three keys: "title" (a compelling, descriptive title, max 60 chars), "description" (a concise, professional summary, max 160 chars), and "tags" (an array of 5-10 highly relevant, commercial-intent lowercase keywords).`;
     const userPrompt = `Generate metadata for a ${type} with the following theme or prompt: "${prompt}"`;
     
     const response = await ai.models.generateContent({
