@@ -1,27 +1,31 @@
+import { createKV } from "@vercel/kv";
 import type { Job } from '../../src/types';
 
-// This is a simple in-memory database for demonstration purposes.
-// In a production environment, you would use a persistent database like Vercel KV (Redis), a relational DB, or a document store.
-const jobStore = new Map<string, Job>();
+// createKV will automatically use the Vercel KV environment variables
+// that you have already set (KV_URL, KV_REST_API_TOKEN, etc.)
+const kv = createKV();
 
 const db = {
   async get(id: string): Promise<Job | null> {
-    return Promise.resolve(jobStore.get(id) || null);
+    // Vercel KV's get method returns the value or null if not found.
+    return kv.get<Job>(id);
   },
   
   async set(id: string, job: Job): Promise<void> {
-    jobStore.set(id, job);
-    return Promise.resolve();
+    // Set the job with a Time-To-Live (TTL) of 24 hours (86400 seconds)
+    // to prevent old jobs from cluttering the database.
+    await kv.set(id, job, { ex: 86400 });
   },
 
   async update(id: string, updates: Partial<Job>): Promise<void> {
-    const job = jobStore.get(id);
+    const job = await kv.get<Job>(id);
     if (job) {
-      jobStore.set(id, { ...job, ...updates });
+      const updatedJob = { ...job, ...updates };
+      // When updating, also extend the TTL.
+      await kv.set(id, updatedJob, { ex: 86400 });
     } else {
       console.warn(`Attempted to update a non-existent job with id: ${id}`);
     }
-    return Promise.resolve();
   },
 };
 

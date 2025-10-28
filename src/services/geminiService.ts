@@ -1,8 +1,7 @@
 import { GoogleGenAI, Type, VideosOperation } from "@google/genai";
 
 // Initialize the Gemini client.
-// The API key is automatically managed by the AI Studio environment.
-// For video generation, a new client will be created on-demand to ensure the latest key is used.
+// The API key is automatically managed by the environment (Vercel, AI Studio, etc.).
 let ai: GoogleGenAI;
 const getAI = () => {
     if (!ai) {
@@ -36,15 +35,14 @@ const getBase64Data = (dataUrl: string): string => {
 export async function generatePhotoConcepts(topic: string, style: string, palette: string, angle: string): Promise<string[]> {
     const ai = getAI();
     const prompt = `
-        Based on the following art direction, generate 3 distinct and detailed photo concepts that are creative and commercially viable.
-        Each concept should be a single, descriptive paragraph. Do not use markdown or lists.
-        
-        Topic: "${topic}"
-        Photography Style: "${style}"
-        Color Palette: "${palette || 'Not specified'}"
-        Camera Angle: "${angle}"
+        As a professional art director, generate 3 distinct and detailed photo concepts based on the following direction. The concepts should be commercially viable and visually stunning, suitable for a high-end stock photography platform. Each concept must be a single, descriptive paragraph targeting an expert photographer, focusing on composition, lighting, mood, and lens choice.
 
-        Return the 3 concepts separated by a newline character.
+        - Topic: "${topic}"
+        - Desired Style: "${style}" (e.g., Cinematic, Minimalist, Photorealistic)
+        - Color Palette: "${palette || 'Photographer\'s choice'}"
+        - Camera Angle/Shot: "${angle}"
+
+        The output should be 3 paragraphs separated by a newline, ready for a professional photoshoot. Aim for a quality that rivals award-winning photography.
     `;
 
     const response = await ai.models.generateContent({
@@ -61,7 +59,11 @@ export async function generatePhotoConcepts(topic: string, style: string, palett
 
 export async function generateStockImage(prompt: string, variation?: string): Promise<string> {
     const ai = getAI();
-    const fullPrompt = `${prompt}${variation ? `, ${variation}` : ''}. High-quality, professional stock photography.`;
+    const fullPrompt = `
+      masterpiece, professional photography, 8k, ultra-realistic, sharp focus.
+      ${prompt}${variation ? `, ${variation}` : ''}.
+      Shot on a professional DSLR camera with a 50mm f/1.8 lens, capturing intricate details and cinematic lighting.
+    `;
 
     const response = await ai.models.generateImages({
         model: 'imagen-4.0-generate-001',
@@ -80,15 +82,15 @@ export async function generateStockImage(prompt: string, variation?: string): Pr
 export async function generateMetadataForAsset(prompt: string, type: 'photo' | 'video'): Promise<AssetMetadata> {
     const ai = getAI();
     const requestPrompt = `
-        Generate metadata for a stock ${type} asset based on the following creative prompt. The metadata should be optimized for searchability on a stock asset platform.
+        Generate professional, SEO-optimized metadata for a stock ${type} asset based on the following creative prompt. The metadata must be perfect for platforms like Adobe Stock or Getty Images.
 
-        Prompt: "${prompt}"
+        Creative Prompt: "${prompt}"
 
-        Return a JSON object with the following structure:
+        Return a single, minified JSON object with the following structure:
         {
-            "title": "A short, descriptive title (5-10 words).",
-            "description": "A detailed paragraph describing the visual content and potential uses (2-3 sentences).",
-            "tags": ["An array of 10-15 relevant keywords and concepts, including technical terms if applicable (e.g., '4k', 'cinematic')."]
+            "title": "A short, descriptive, and highly commercial title (5-10 words).",
+            "description": "A detailed paragraph describing the visual content, mood, and potential commercial uses (2-3 sentences).",
+            "tags": ["An array of exactly 15-20 highly relevant keywords, from specific to general, including technical terms (e.g., '4k', 'cinematic', 'low-angle shot') and conceptual ideas."]
         }
     `;
 
@@ -134,10 +136,9 @@ export async function researchAndGeneratePhotoBatch(
     // 1. Research trends
     progressCallback('researching', 'Researching market trends...');
     const researchPrompt = `
-        As an expert creative director, research current visual trends related to the topic "${topic}".
-        Identify 3 distinct, commercially viable sub-themes or concepts that would perform well as stock photography.
-        For each theme, provide a detailed, one-paragraph creative prompt suitable for an image generation AI like Imagen.
-        The prompts should describe the scene, subject, lighting, composition, and mood.
+        Act as an expert Art Director. Conduct a deep-dive research on the topic "${topic}".
+        Identify 3 distinct, commercially powerful, and visually unique sub-themes.
+        For each theme, create a master prompt for a professional photographer using an AI tool. The prompt must be extremely detailed, specifying scene, subject, lighting, composition, camera settings (lens, aperture), and overall mood. Aim for concepts that would be best-sellers on a stock photo site.
     `;
     const researchResponse = await ai.models.generateContent({
         model: 'gemini-2.5-pro',
@@ -177,24 +178,21 @@ export async function researchAndGeneratePhotoBatch(
 
 // ---- Video Generator Functions ----
 
-// For video, create a new AI instance to ensure the latest key from the dialog is used.
-const getVideoAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY! });
-
 export async function generateAndExtendVideo(
     prompt: string, 
     referenceImage: string | null,
     progressCallback: (message: string) => void
 ): Promise<VideosOperation> {
-    const ai = getVideoAI();
+    const ai = getAI();
 
-    progressCallback("Generating initial 7-second clip...");
+    progressCallback("Generating initial 7-second clip (1/5)...");
     let initialOperation = await ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
         prompt,
         ...(referenceImage && { image: { imageBytes: getBase64Data(referenceImage), mimeType: 'image/png' } }),
         config: {
             numberOfVideos: 1,
-            resolution: '720p',
+            resolution: '1080p',
             aspectRatio: '16:9'
         }
     });
@@ -214,14 +212,14 @@ export async function generateAndExtendVideo(
     // Extend 4 times to get to 35 seconds (7s base + 4 * 7s extensions)
     let currentOperation = initialOperation;
     for (let i = 1; i <= 4; i++) {
-        progressCallback(`Extending video... (${i * 7 + 7}s)`);
+        progressCallback(`Extending scene (${i+1}/5)...`);
         currentOperation = await ai.models.generateVideos({
             model: 'veo-3.1-generate-preview',
-            prompt: 'Continue the scene with a surprising and visually interesting development.',
+            prompt: 'Continue the scene with a surprising and visually interesting development, maintaining cinematic quality.',
             video: currentOperation.response?.generatedVideos?.[0]?.video,
             config: {
                 numberOfVideos: 1,
-                resolution: '720p',
+                resolution: '1080p',
                 aspectRatio: '16:9',
             }
         });
@@ -319,13 +317,13 @@ export async function generateCreativeStrategy(topic: string, photoCount: number
 }
 
 export async function generateVideo(prompt: string): Promise<VideosOperation> {
-    const ai = getVideoAI();
+    const ai = getAI();
     let operation = await ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
         prompt: prompt,
         config: {
             numberOfVideos: 1,
-            resolution: '720p',
+            resolution: '1080p',
             aspectRatio: '16:9'
         }
     });
@@ -333,16 +331,9 @@ export async function generateVideo(prompt: string): Promise<VideosOperation> {
 }
 
 export async function checkVideoOperationStatus(operationName: string): Promise<VideosOperation> {
-    const ai = getVideoAI();
-    try {
-        const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
-        return operation;
-    } catch (e) {
-        if(e instanceof Error && e.message.includes('Requested entity was not found')) {
-            throw new Error('API_KEY_INVALID');
-        }
-        throw e;
-    }
+    const ai = getAI();
+    const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
+    return operation;
 }
 
 // ---- Quantitative Fund Manager Functions ----

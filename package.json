@@ -15,7 +15,8 @@
     "react-easy-crop": "^5.5.3",
     "jszip": "^3.10.1",
     "google-auth-library": "^10.4.2",
-    "@vercel/node": "^5.5.0"
+    "@vercel/node": "^5.5.0",
+    "@vercel/kv": "^1.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

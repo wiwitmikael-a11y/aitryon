@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     generateCreativeStrategy,
     generateStockImage,
@@ -43,21 +43,8 @@ const CreativeDirector: React.FC = () => {
     const [assets, setAssets] = useState<Asset[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [apiKeySelected, setApiKeySelected] = useState(false);
 
     const pollingRefs = useRef<Map<string, number>>(new Map());
-
-    const checkApiKey = useCallback(async () => {
-        // Fix: Added a check for window.aistudio before using it.
-        if (window.aistudio) {
-            const hasKey = await window.aistudio.hasSelectedApiKey();
-            setApiKeySelected(hasKey);
-        }
-    }, []);
-
-    useEffect(() => {
-        checkApiKey();
-    }, [checkApiKey]);
 
     // Cleanup polling intervals on unmount
     useEffect(() => {
@@ -96,11 +83,6 @@ const CreativeDirector: React.FC = () => {
     };
     
     const handleStartProduction = () => {
-        if (videoCount > 0 && !apiKeySelected) {
-            setError("Video generation requires selecting an API key for billing. Please select a key to proceed.");
-            handleSelectKey(); // Prompt user to select key
-            return;
-        }
         setStage('production');
         assets.forEach(asset => {
             if (asset.type === 'photo') {
@@ -163,10 +145,6 @@ const CreativeDirector: React.FC = () => {
                 clearInterval(intervalId);
                 pollingRefs.current.delete(id);
                 const error = err instanceof Error ? err.message : 'Polling failed.';
-                if(error === 'API_KEY_INVALID') {
-                    setError("Operation failed. Your API Key may be invalid or missing permissions. Please select a valid key.");
-                    setApiKeySelected(false);
-                }
                 updateAssetState(id, { status: 'failed', error });
             }
         }, VIDEO_POLLING_INTERVAL);
@@ -185,15 +163,6 @@ const CreativeDirector: React.FC = () => {
     const handleDownloadPackage = () => {
         createContentPackageZip(assets);
     };
-
-    const handleSelectKey = async () => {
-        // Fix: Added a check for window.aistudio before using it.
-        if (window.aistudio) {
-            await window.aistudio.openSelectKey();
-            setApiKeySelected(true);
-            setError(null);
-        }
-    };
     
     const handleStartOver = () => {
         setStage('idea');
@@ -210,7 +179,7 @@ const CreativeDirector: React.FC = () => {
             case 'idea':
                 return <IdeaStage topic={topic} setTopic={setTopic} photoCount={photoCount} setPhotoCount={setPhotoCount} videoCount={videoCount} setVideoCount={setVideoCount} onGenerate={handleGenerateStrategy} isLoading={isLoading} />;
             case 'strategy':
-                return <StrategyStage assets={assets} onConfirm={handleStartProduction} onBack={() => setStage('idea')} videoCount={videoCount} apiKeySelected={apiKeySelected} onSelectKey={handleSelectKey}/>;
+                return <StrategyStage assets={assets} onConfirm={handleStartProduction} onBack={() => setStage('idea')} />;
             case 'production':
                 return <ProductionStage assets={assets} />;
             case 'package':
@@ -271,7 +240,7 @@ const IdeaStage: React.FC<any> = ({ topic, setTopic, photoCount, setPhotoCount, 
     </div>
 );
 
-const StrategyStage: React.FC<any> = ({ assets, onConfirm, onBack, videoCount, apiKeySelected, onSelectKey }) => (
+const StrategyStage: React.FC<any> = ({ assets, onConfirm, onBack }) => (
     <div>
         <h3 className="text-lg font-semibold text-slate-200 mb-4">Review the AI-generated content plan. When you're ready, proceed to production.</h3>
         <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
@@ -282,13 +251,6 @@ const StrategyStage: React.FC<any> = ({ assets, onConfirm, onBack, videoCount, a
                 </div>
             ))}
         </div>
-         {videoCount > 0 && !apiKeySelected && (
-            <div className="mt-4 bg-amber-900/20 p-4 rounded-lg text-center text-amber-300">
-                <p className="font-semibold">Action Required: Select API Key</p>
-                <p className="text-sm mb-3">Video generation with Veo requires a Google Cloud API key for billing. Please select your key to continue.</p>
-                <button onClick={onSelectKey} className="bg-amber-500 hover:bg-amber-400 text-white font-bold py-2 px-4 rounded-full text-sm">Select API Key</button>
-            </div>
-        )}
         <div className="flex justify-center gap-4 mt-6">
             <button onClick={onBack} className="px-6 py-2 rounded-full bg-slate-600 hover:bg-slate-500">Back</button>
             <button onClick={onConfirm} className="px-8 py-3 rounded-full bg-green-600 hover:bg-green-500 text-white font-bold flex items-center gap-2 shadow-lg">
