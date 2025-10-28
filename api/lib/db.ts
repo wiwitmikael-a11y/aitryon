@@ -1,4 +1,4 @@
-import { createKV } from "@vercel/kv";
+import createKV from "@vercel/kv";
 import type { Job } from '../../src/types';
 
 // createKV will automatically use the Vercel KV environment variables
