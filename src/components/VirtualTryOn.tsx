@@ -1,192 +1,197 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ImageUploader from './ImageUploader';
 import ResultDisplay from './ResultDisplay';
+import { submitGenerationJob, checkJobStatus } from '../services/vertexAIService';
+import type { HistoryItem, Job } from '../types';
 import HistoryGallery from './HistoryGallery';
-import CropperModal from './CropperModal';
 import GuideModal from './GuideModal';
-import { InfoIcon } from './icons/InfoIcon';
+import CropperModal from './CropperModal';
 import { getCroppedImg } from '../utils/imageUtils';
-import { startVirtualTryOnJob, checkVirtualTryOnJobStatus } from '../services/vertexAIService';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import type { HistoryItem } from '../types';
-import type { Area } from 'react-easy-crop/types';
+import { InfoIcon } from './icons/InfoIcon';
+import { Area } from 'react-easy-crop';
+import { GenerateIcon } from './icons/GenerateIcon';
 
-const POLLING_INTERVAL = 5000; // 5 seconds
+const POLLING_INTERVAL = 3000; // 3 seconds
 
-const VirtualTryOn: React.FC = () => {
-    const [personImage, setPersonImage] = useState<string | null>(null);
-    const [productImage, setProductImage] = useState<string | null>(null); // This is the cropped image
-    const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    
-    const [history, setHistory] = useLocalStorage<HistoryItem[]>('vto-history', []);
+function VirtualTryOn() {
+  const [personImage, setPersonImage] = useState<string | null>(null);
+  const [productImage, setProductImage] = useState<string | null>(null);
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [history, setHistory] = useLocalStorage<HistoryItem[]>('vto-history', []);
+  
+  const [guideShown, setGuideShown] = useLocalStorage('vto-guide-shown', false);
+  const [isGuideOpen, setIsGuideOpen] = useState(!guideShown);
+  
+  const [isCropperOpen, setIsCropperOpen] = useState(false);
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
 
-    // Cropping state
-    const [imageToCrop, setImageToCrop] = useState<string | null>(null);
-    const [croppedProductImageForUploader, setCroppedProductImageForUploader] = useState<string | null>(null);
+  const pollingRef = useRef<number | null>(null);
 
-    // Polling state
-    const [jobId, setJobId] = useState<string | null>(null);
-    const pollingIntervalRef = useRef<number | null>(null);
-
-    // Guide modal
-    const [showGuide, setShowGuide] = useState(true);
-
-    const handleImageUpload = (setter: React.Dispatch<React.SetStateAction<string | null>>) => (base64: string) => {
-        setter(base64 || null);
-    };
-    
-    const handleCropRequest = (base64: string) => {
-        setImageToCrop(base64);
-    };
-
-    const onCropComplete = async (croppedAreaPixels: Area) => {
-        if (imageToCrop) {
-            try {
-                const croppedImageBase64 = await getCroppedImg(imageToCrop, croppedAreaPixels);
-                setProductImage(croppedImageBase64); // This is sent to the API
-                setCroppedProductImageForUploader(croppedImageBase64); // This is to show in the uploader preview
-            } catch (e) {
-                console.error(e);
-                setError('Failed to crop image.');
-            } finally {
-                setImageToCrop(null);
-            }
-        }
-    };
-
-    const clearPolling = () => {
-        if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-        }
-    };
-
-    useEffect(() => {
-        return () => clearPolling(); // Cleanup on unmount
-    }, []);
-
-    const pollJobStatus = async (currentJobId: string) => {
-        try {
-            const status = await checkVirtualTryOnJobStatus(currentJobId);
-            if (status.state === 'SUCCEEDED') {
-                clearPolling();
-                setJobId(null);
-                setGeneratedImage(status.resultImageUrl!);
-                setIsLoading(false);
-                // Add to history
-                if (personImage && productImage && status.resultImageUrl) {
-                    const newHistoryItem: HistoryItem = {
-                        id: new Date().toISOString(),
-                        personImage,
-                        productImage,
-                        resultImage: status.resultImageUrl,
-                    };
-                    setHistory(prev => [newHistoryItem, ...prev]);
-                }
-            } else if (status.state === 'FAILED') {
-                clearPolling();
-                setJobId(null);
-                setError(status.error || 'The generation process failed.');
-                setIsLoading(false);
-            }
-        } catch (err) {
-            clearPolling();
+  const handleJobSuccess = useCallback((job: Job) => {
+    if (job.resultImage) {
+      setGeneratedImage(job.resultImage);
+      const newHistoryItem: HistoryItem = {
+        id: job.id,
+        resultImage: job.resultImage,
+        personImage: job.personImage,
+        productImage: job.productImage,
+      };
+      // Add new item and prevent duplicates
+      setHistory(prevHistory => [newHistoryItem, ...prevHistory.filter(h => h.id !== job.id)]);
+    } else {
+      setError("Job completed but no image was returned.");
+    }
+  }, [setHistory]);
+  
+  const pollJobStatus = useCallback(async (id: string) => {
+    try {
+      const job = await checkJobStatus(id);
+      switch (job.status) {
+        case 'COMPLETED':
+          setIsLoading(false);
+          setJobId(null);
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          handleJobSuccess(job);
+          break;
+        case 'FAILED':
+          setIsLoading(false);
+          setJobId(null);
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          setError(job.error || 'The generation job failed for an unknown reason.');
+          break;
+        case 'PENDING':
+        case 'PROCESSING':
+          break;
+        default:
+            setIsLoading(false);
             setJobId(null);
-            setError(err instanceof Error ? err.message : 'Failed to poll job status.');
-            setIsLoading(false);
-        }
+            if (pollingRef.current) clearInterval(pollingRef.current);
+            setError(`Unknown job status: ${job.status}`);
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setJobId(null);
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      setError(err instanceof Error ? `Failed to check job status: ${err.message}` : 'An unknown error occurred while polling for status.');
+    }
+  }, [handleJobSuccess]);
+
+  useEffect(() => {
+    if (jobId) {
+      pollingRef.current = window.setInterval(() => { pollJobStatus(jobId); }, POLLING_INTERVAL);
+    }
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
     };
+  }, [jobId, pollJobStatus]);
 
-    useEffect(() => {
-        if (jobId) {
-            pollingIntervalRef.current = window.setInterval(() => {
-                pollJobStatus(jobId);
-            }, POLLING_INTERVAL);
-        }
-        return () => clearPolling();
-    }, [jobId, pollJobStatus]);
+  const handleGenerate = useCallback(async () => {
+    if (!personImage || !productImage) {
+      setError('Please upload both a person and a product image.');
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    setGeneratedImage(null);
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    try {
+      const { jobId } = await submitGenerationJob(personImage, productImage);
+      setJobId(jobId);
+    } catch (err) {
+      setError(err instanceof Error ? `Submission failed: ${err.message}` : 'An unknown error occurred during job submission.');
+      setIsLoading(false);
+    }
+  }, [personImage, productImage]);
+  
+  const handleReuse = (item: HistoryItem) => {
+    setPersonImage(item.personImage);
+    setProductImage(item.productImage);
+    setGeneratedImage(item.resultImage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-    const handleGenerateClick = async () => {
-        if (!personImage || !productImage) {
-            setError('Please upload both a person and a clothing item image.');
-            return;
-        }
-        setIsLoading(true);
-        setError(null);
-        setGeneratedImage(null);
+  const handleDelete = (id: string) => {
+    setHistory(history.filter(item => item.id !== id));
+  };
+  
+  const handleCropRequest = (base64: string) => {
+      setImageToCrop(base64);
+      setIsCropperOpen(true);
+  };
 
-        try {
-            const { jobId: newJobId } = await startVirtualTryOnJob(personImage, productImage);
-            setJobId(newJobId);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
-            setIsLoading(false);
-        }
-    };
+  const handleCropComplete = async (croppedAreaPixels: Area) => {
+      if(imageToCrop) {
+          try {
+              const croppedImageBase64 = await getCroppedImg(imageToCrop, croppedAreaPixels);
+              setProductImage(croppedImageBase64);
+          } catch(e) {
+              console.error("Cropping failed:", e);
+              setError("Failed to crop the image.");
+          }
+      }
+      setIsCropperOpen(false);
+      setImageToCrop(null);
+  };
+  
+  const closeGuide = () => {
+      setIsGuideOpen(false);
+      setGuideShown(true);
+  }
 
-    const handleReuseHistoryItem = (item: HistoryItem) => {
-        setPersonImage(item.personImage);
-        setProductImage(item.productImage);
-        setCroppedProductImageForUploader(item.productImage);
-        setGeneratedImage(item.resultImage);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-    
-    const handleDeleteHistoryItem = (id: string) => {
-        setHistory(prev => prev.filter(item => item.id !== id));
-    };
+  const canGenerate = personImage && productImage && !isLoading;
 
-    const isGenerateDisabled = !personImage || !productImage || isLoading;
-
-    return (
-        <div className="space-y-8">
-            {showGuide && <GuideModal onClose={() => setShowGuide(false)} />}
-            {imageToCrop && <CropperModal imageSrc={imageToCrop} onCropComplete={onCropComplete} onClose={() => setImageToCrop(null)} />}
-            
-            <div className="text-center max-w-3xl mx-auto">
-                <h1 className="text-3xl font-bold text-white mb-2">Virtual Try-On</h1>
-                <p className="text-lg text-slate-400">Upload a photo of a person and a clothing item to generate a new image showing the person wearing the garment.</p>
+  return (
+    <>
+      {isGuideOpen && <GuideModal onClose={closeGuide} />}
+      {isCropperOpen && imageToCrop && (
+        <CropperModal 
+            imageSrc={imageToCrop}
+            onClose={() => setIsCropperOpen(false)}
+            onCropComplete={handleCropComplete}
+        />
+      )}
+      <div className="space-y-8">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+          <div className="lg:col-span-2 bg-slate-900/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6 border border-slate-800">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-bold text-cyan-400">Upload Your Images</h2>
+              <button onClick={() => setIsGuideOpen(true)} className="flex items-center gap-2 text-slate-400 hover:text-cyan-400 transition-colors text-sm">
+                <InfoIcon />
+                <span>Upload Guide</span>
+              </button>
             </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                <div className="bg-slate-900/50 p-6 rounded-2xl shadow-lg flex flex-col gap-6 border border-slate-800">
-                    <div className="flex justify-between items-center">
-                        <h2 className="text-xl font-bold text-slate-100">1. Upload Images</h2>
-                        <button onClick={() => setShowGuide(true)} className="text-slate-400 hover:text-cyan-400 transition-colors flex items-center gap-2 text-sm">
-                            <InfoIcon />
-                            <span>Upload Guide</span>
-                        </button>
-                    </div>
-                    <ImageUploader label="Person Image" onImageUpload={handleImageUpload(setPersonImage)} initialImage={personImage} />
-                    <ImageUploader label="Clothing Item" onCropRequest={handleCropRequest} onImageUpload={handleImageUpload(setProductImage)} initialImage={croppedProductImageForUploader} />
-                    
-                    <button
-                        onClick={handleGenerateClick}
-                        disabled={isGenerateDisabled}
-                        className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-400 text-white font-bold py-3 px-6 rounded-full text-lg transition-colors"
-                    >
-                        {isLoading ? 'Generating...' : '2. Generate Try-On'}
-                    </button>
-                </div>
-
-                <div className="sticky top-24">
-                    <ResultDisplay
-                        generatedImage={generatedImage}
-                        isLoading={isLoading}
-                        error={error}
-                    />
-                </div>
+            <ImageUploader label="1. Person Image" onImageUpload={(base64) => setPersonImage(base64)} initialImage={personImage}/>
+            <ImageUploader label="2. Clothing Item" onImageUpload={(base64) => setProductImage(base64)} onCropRequest={handleCropRequest} initialImage={productImage}/>
+            <div className="pt-4 mt-auto">
+               <button
+                  onClick={handleGenerate}
+                  disabled={!canGenerate}
+                  className="w-full flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed disabled:text-slate-400 text-white font-bold py-3 px-6 rounded-full text-lg shadow-lg shadow-cyan-500/10 transition-all duration-300 transform hover:scale-105 disabled:scale-100 disabled:shadow-none"
+              >
+                  <GenerateIcon />
+                  {isLoading ? 'Generating...' : 'Perform Virtual Try-On'}
+              </button>
             </div>
+          </div>
 
-            <HistoryGallery 
-                history={history} 
-                onReuse={handleReuseHistoryItem} 
-                onDelete={handleDeleteHistoryItem} 
+          <div className="lg:col-span-3 bg-slate-900/50 p-6 rounded-2xl shadow-lg border border-slate-800">
+            <h2 className="text-xl font-bold text-cyan-400 mb-6">3. Generated Result</h2>
+            <ResultDisplay
+              generatedImage={generatedImage}
+              isLoading={isLoading}
+              error={error}
             />
+          </div>
         </div>
-    );
-};
+      
+        <HistoryGallery history={history} onReuse={handleReuse} onDelete={handleDelete} />
+      </div>
+    </>
+  );
+}
 
 export default VirtualTryOn;
