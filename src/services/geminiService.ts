@@ -18,11 +18,20 @@ async function callGeminiProxy<T = any>(task: string, payload: object): Promise<
         body: JSON.stringify({ task, ...payload }),
     });
 
-    const data = await response.json();
     if (!response.ok) {
-        throw new Error(data.error || 'An unknown error occurred calling the Gemini proxy.');
+        let errorMessage = `API call failed with status ${response.status}`;
+        try {
+            // Try to get a specific error message from the JSON body
+            const errorData = await response.json();
+            errorMessage = errorData.error || JSON.stringify(errorData);
+        } catch (e) {
+            // If the body isn't JSON, it's likely an HTML error page from Vercel.
+            errorMessage = `A server error occurred (status ${response.status}). The response was not in a valid JSON format. Please check the server logs.`;
+        }
+        throw new Error(errorMessage);
     }
-    return data;
+
+    return response.json();
 }
 
 export const generateCreativeStrategy = async (

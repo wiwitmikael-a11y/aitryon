@@ -20,9 +20,13 @@ async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    const { task, ...payload } = req.body;
-
     try {
+        const { task, ...payload } = req.body;
+
+        if (!task) {
+            return res.status(400).json({ error: 'Task is missing from the request body.' });
+        }
+
         let result;
         switch (task) {
             case 'generateCreativeStrategy':
@@ -54,7 +58,7 @@ async function handler(req: VercelRequest, res: VercelResponse) {
         }
         res.status(200).json(result);
     } catch (error) {
-        console.error(`Error in task '${task}':`, error);
+        console.error(`Error in proxy handler:`, error);
         const message = error instanceof Error ? error.message : 'An unknown server error occurred.';
         res.status(500).json({ error: message });
     }
@@ -219,7 +223,8 @@ async function handleGenerateVideo({ prompt, aspectRatio }: any) {
 
     if (!response.ok) {
         const errorBody = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
-        throw new Error(`Vertex AI request failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
+        const vertexError = errorBody.error?.message || JSON.stringify(errorBody);
+        throw new Error(`Vertex AI request failed with status ${response.status}: ${vertexError}`);
     }
 
     return response.json();
@@ -240,7 +245,8 @@ async function handleCheckVideoOperationStatus({ operationName }: any) {
 
     if (!response.ok) {
         const errorBody = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
-        throw new Error(`Vertex AI status check failed with status ${response.status}: ${errorBody.error?.message || 'Unknown error'}`);
+        const vertexError = errorBody.error?.message || JSON.stringify(errorBody);
+        throw new Error(`Vertex AI status check failed with status ${response.status}: ${vertexError}`);
     }
     
     return response.json();
