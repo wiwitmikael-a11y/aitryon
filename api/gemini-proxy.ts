@@ -1,7 +1,8 @@
 // FIX: Add Buffer import for Node.js environment in Vercel.
 import { Buffer } from 'buffer';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from '@google/genai';
+// FIX: Add Modality for image generation requests.
+import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold, Modality } from '@google/genai';
 import { getAuthToken } from './lib/google-auth';
 import {
     VIRTUAL_TRY_ON_MODEL,
@@ -70,67 +71,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { task, ...payload } = req.body;
 
         switch (task) {
+            // FIX: Refactored to use the @google/genai SDK for stability and simplicity.
+            // The previous raw fetch to Vertex AI was causing server crashes.
             case 'virtualTryOn': {
                 const { personImage, productImage } = payload;
                 if (!personImage || !productImage) {
                     return res.status(400).json({ error: 'Missing person or product image' });
                 }
-
-                const authToken = await getAuthToken();
-                const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON || '{}');
-                const projectId = credentials.project_id;
-                if (!projectId) {
-                    throw new Error('Project ID not found in credentials.');
-                }
-
-                const endpoint = `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectId}/locations/us-central1/publishers/google/models/${VIRTUAL_TRY_ON_MODEL}:streamGenerateContent`;
                 
-                const requestBody = {
-                    contents: {
-                        role: "user",
-                        parts: [
-                            { inlineData: { mimeType: personImage.match(/data:(.*);base64,/)?.[1] || 'image/png', data: personImage.split(',')[1] } },
-                            { inlineData: { mimeType: productImage.match(/data:(.*);base64,/)?.[1] || 'image/png', data: productImage.split(',')[1] } },
-                            { text: 'Put the clothing item from the second image onto the person in the first image. Make it look realistic, retaining the person\'s features and pose. Ensure the clothing fits naturally.' }
-                        ]
+                const personImagePart = {
+                    inlineData: {
+                        mimeType: personImage.match(/data:(.*);base64,/)?.[1] || 'image/png',
+                        data: personImage.split(',')[1],
                     },
-                    generationConfig: {
-                        responseMimeType: "image/png"
-                    },
-                     safetySettings: [
-                        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                    ]
                 };
 
-                const apiResponse = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`,
-                        'Content-Type': 'application/json'
+                const productImagePart = {
+                    inlineData: {
+                        mimeType: productImage.match(/data:(.*);base64,/)?.[1] || 'image/png',
+                        data: productImage.split(',')[1],
                     },
-                    body: JSON.stringify(requestBody)
+                };
+        
+                const textPart = {
+                    text: 'Put the clothing item from the second image onto the person in the first image. Make it look realistic, retaining the person\'s features and pose. Ensure the clothing fits naturally.',
+                };
+        
+                const response = await geminiAi.models.generateContent({
+                    model: VIRTUAL_TRY_ON_MODEL,
+                    contents: { parts: [personImagePart, productImagePart, textPart] },
+                    config: {
+                        responseModalities: [Modality.IMAGE],
+                    },
                 });
-
-                if (!apiResponse.ok) {
-                    const errorBody = await apiResponse.text();
-                    throw new Error(`Vertex AI API request failed with status ${apiResponse.status}: ${errorBody}`);
-                }
-                
-                const responseText = await apiResponse.text();
-                const jsonParts = responseText.match(/{[\s\S]*?}/g) || [];
-                const lastPart = jsonParts.length > 0 ? JSON.parse(jsonParts[jsonParts.length - 1]) : {};
-                const firstPart = lastPart?.candidates?.[0]?.content?.parts?.[0];
-
-                if (firstPart && 'inlineData' in firstPart && firstPart.inlineData?.data) {
-                    const resultImageBase64 = firstPart.inlineData.data;
-                    const mimeType = firstPart.inlineData.mimeType ?? 'image/png';
+        
+                const part = response.candidates?.[0]?.content?.parts?.[0];
+                if (part && 'inlineData' in part && part.inlineData?.data) {
+                    const resultImageBase64 = part.inlineData.data;
+                    const mimeType = part.inlineData.mimeType ?? 'image/png';
                     const resultImage = `data:${mimeType};base64,${resultImageBase64}`;
                     return res.status(200).json({ resultImage });
                 }
-                throw new Error('No image data found in Vertex AI response');
+                
+                throw new Error('No image data found in Gemini API response');
             }
 
 
