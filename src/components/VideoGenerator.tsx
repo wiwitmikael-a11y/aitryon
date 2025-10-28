@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import {
     generateVideo,
@@ -114,7 +115,9 @@ const VideoGenerator: React.FC = () => {
                         prompt,
                         image
                     };
-                    setHistory(prev => [newHistoryItem, ...prev.filter(item => item.id !== newHistoryItem.id)]);
+                    // FIX: Avoid functional update form due to custom hook typing. Read from localStorage to get latest history.
+                    const currentHistory: VideoHistoryItem[] = JSON.parse(localStorage.getItem('video-generator-history') || '[]');
+                    setHistory([newHistoryItem, ...currentHistory.filter(item => item.id !== newHistoryItem.id)]);
                 }
             } catch (err) {
                 if (pollingRef.current) clearInterval(pollingRef.current);
