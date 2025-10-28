@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type } from "@google/genai";
+import { Buffer } from 'buffer';
 
 // Ensure the API key is available in environment variables
 if (!process.env.API_KEY) {
@@ -136,7 +137,9 @@ async function handleGenerateVideo({ prompt, image }: any) {
 }
 
 async function handleCheckVideoOperationStatus({ operationName }: any) {
-    const operation = await ai.operations.get({ name: operationName });
+    // FIX: Use the correct 'getVideosOperation' method instead of the non-existent 'get'.
+    // We construct a minimal operation object as required by the SDK.
+    const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
     return operation;
 }
 
